@@ -1,0 +1,11 @@
+# build output / packages
+dist/
+*.zip
+*.msi
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.user
+*.suo
