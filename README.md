@@ -99,4 +99,4 @@ Click **Save** → NcDavTray maps the drive, applies the icon/label, and keeps i
 ## Credits
 
 - **Author & Maintainer:** [[ernolf] Raphael Gradenwitz](https://github.com/ernolf)
-- **Acknowledgements:** Windows WebDAV mini-redirector, and the PowerShell & WinForms exosystem.
+- **Acknowledgements:** Windows WebDAV mini-redirector, and the PowerShell & WinForms ecosystem.
