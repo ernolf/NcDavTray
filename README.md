@@ -6,7 +6,7 @@
   <p>
     <a href="https://github.com/ernolf/NcDavTray/releases"><img alt="Release" src="https://img.shields.io/github/v/release/ernolf/NcDavTray"></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue"></a>
-    <img alt="PowerShell 5.1" src="https://img.shields.io/badge/PowerShell-5.1+-informational">
+    <img alt="PowerShell 5.1" src="https://img.shields.io/badge/Windows%20PowerShell-5.1-blue">
   </p>
 </p>
 <hr>
