@@ -44,7 +44,7 @@ No administrator rights required.
 
 ## Install & Quick Start
 
-1. **Download the latest ZIP** from this repository’s [Releases](releases) page.
+1. **Download the latest ZIP** from this repository’s [Releases](https://github.com/ernolf/NcDavTray/releases) page.
 2. **Extract** the ZIP to a folder **in your user profile**.
 3. **Run** `installNcDavTray.cmd` and choose:
 
