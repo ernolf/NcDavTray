@@ -29,6 +29,7 @@ Map your Nextcloud server to a real Windows drive letter (e.g. `Z:`) and keep it
   * **Portable**: credentials encrypted with **AES‑256 + PBKDF2** (passphrase you choose)
 * **Watchdog** for clean unmount if the app (or USB stick in portable mode) disappears
 * **Multi‑language (i18n)** with live switching and simple JSON language packs
+* **WebClient tuning tab**: inspect and adjust the underlying Windows WebDAV redirector (WebClient) limits and timeouts with safe defaults, inline help texts and UAC-guarded “Apply changes” button.
 
 ---
 
@@ -68,6 +69,21 @@ Click **Save** → NcDavTray maps the drive, applies the icon/label, and keeps i
 
 * **Left‑click**: shows a short status balloon (server, drive, subpath, state)
 * **Right‑click**: *Connect*, *Disconnect (pause)*, *Settings*, *About*, *Exit*
+
+---
+
+## Tuning the WebClient service
+
+NcDavTray provides a **WebClient tuning** tab in the Settings dialog. It exposes the most relevant registry settings of the underlying Windows WebDAV redirector (WebClient) in a safe, documented way:
+
+* Maximum number of files per folder (attribute cache size)
+* Maximum file size (Max = 4 GB)
+* Local / internet server timeouts
+* Send/receive timeout
+* "Server not found" cache lifetime
+
+All values are shown with both their **current registry value** and a **readable explanation**, and each option has an inline help text.  
+Reading the settings does **not** require admin rights; elevation (UAC) requires administrator permissions and is only requested when you click **“Apply changes”** which will write the new values back to the WebClient service.
 
 ---
 
