@@ -28,18 +28,18 @@ Map your Nextcloud server to a real Windows drive letter (e.g. `Z:`) and keep it
   * **Installed**: credentials protected with Windows **DPAPI** (bound to your user profile)
   * **Portable**: credentials encrypted with **AES‑256 + PBKDF2** (passphrase you choose)
 * **Watchdog** for clean unmount if the app (or USB stick in portable mode) disappears
-* **Multi‑language (i18n)** with live switching and simple JSON language packs
 * **WebClient tuning tab**: inspect and adjust the underlying Windows WebDAV redirector (WebClient) limits and timeouts with safe defaults, inline help texts and UAC-guarded “Apply changes” button.
+* **Multi‑language (i18n)** with live switching and simple JSON language packs
 
 ---
 
 ## Requirements
 
 * **Windows 10 / 11** with **Windows PowerShell 5.1** (the provided launcher starts PS 5.1 in STA automatically)
-* **WebClient** service available & enabled (Windows WebDAV mini‑redirector)
+* **WebClient** service (Windows WebDAV mini‑redirector)
 * **Nextcloud** reachable via **HTTPS** (connection uses a **Nextcloud App Password**)
 
-No administrator rights required.
+No administrator permissions are required except for the optional WebClient‑service handling.
 
 ---
 
@@ -81,9 +81,27 @@ NcDavTray provides a **WebClient tuning** tab in the Settings dialog. It exposes
 * Local / internet server timeouts
 * Send/receive timeout
 * "Server not found" cache lifetime
+* Start service / Restart service
+* Default service startype (Disabled, Manual, Automatic)
 
 All values are shown with both their **current registry value** and a **readable explanation**, and each option has an inline help text.  
 Reading the settings does **not** require admin rights; elevation (UAC) requires administrator permissions and is only requested when you click **“Apply changes”** which will write the new values back to the WebClient service.
+
+---
+
+##  Multi‑language (i18n) support
+
+Live switching with simple JSON language packs:
+  - builtin
+    - English
+  - i18n file:
+    - German
+    - Spanish
+    - French
+    - Italian
+    - Dutch
+    - Portuguese (Brazil)
+  - (More to come, translators welcome)
 
 ---
 

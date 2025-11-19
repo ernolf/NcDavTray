@@ -1,24 +1,16 @@
-# NcDavTray.ps1
+# NDT.ps1
 
 # SPDX-FileCopyrightText: 2025 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# WebDAV tray watcher + watchdog (PowerShell 5.1 + WinForms)
-# 1.1.0
+[CmdletBinding()] param([ValidateSet('', 'Install', 'ExportPortable')] [string]$Action = '', [switch]$Watchdog, [string]$MainMutexName)
 
-[CmdletBinding()]
-param(
-	[ValidateSet('', 'Install', 'ExportPortable')]
-	[string]$Action = '',
-	[switch]$Watchdog,
-	[string]$MainMutexName
-)
 # --- Anchor current script path/name/dir for later use (PS 5.1 safe) ---
 try { if (-not $script:ThisScriptPath -and $PSCommandPath) { $script:ThisScriptPath = $PSCommandPath } } catch {}
 try { if (-not $script:ThisScriptPath -and $MyInvocation -and $MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) { $script:ThisScriptPath = $MyInvocation.MyCommand.Path } } catch {}
 
 # --- App meta ---
-$Version = '1.1.0'
+$Version = '1.1.1'
 $Author = '[ernolf] Raphael Gradenwitz'
 $ProjectUrl = 'https://github.com/ernolf/NcDavTray'
 
@@ -152,15 +144,15 @@ $AppName = 'NcDavTray'
 $AppNameShort = 'NDT' 
 $HereDir = Split-Path -Parent $PSCommandPath
 $ScriptFile = [System.IO.Path]::GetFileName($PSCommandPath)
-$RegBase = "HKCU:\Software\$AppName"
+$RegBase = ("HKCU:\Software\{0}" -f $AppName)
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $RegMP2 = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2'
 $RegWebClient = 'HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters'
 $InstallDir = Join-Path $env:LOCALAPPDATA $AppName
 $InstallBin = Join-Path $InstallDir $ScriptFile
-$WDMutex = "Local\${AppName}Watchdog"
-$PortJson = Join-Path $HereDir "$($AppName)_portable.json"
-$SecretPath = Join-Path $HereDir "$($AppNameShort)_secret.dat"
+$WDMutex = ("Local\{0}Watchdog" -f $AppName)
+$PortJson = Join-Path $HereDir ("{0}_portable.json" -f $AppName)
+$SecretPath = Join-Path $HereDir ("{0}_secret.dat" -f $AppNameShort)
 $IsInstalled = ($PSCommandPath -ieq $InstallBin)
 $PortableMode = -not $IsInstalled
 $ernolfB64 = @'
@@ -179,6 +171,8 @@ if (-not $script:ButtonH) { $script:ButtonH = 28 }
 if (-not $script:ButtonXH) { $script:ButtonXH = 32 }
 # Default vertical padding for button rows
 if (-not $script:ButtonPadY) { $script:ButtonPadY = 8 }
+# Minimal logical width for small dialog buttons (OK / Yes / No / Cancel)
+if (-not $script:ButtonMinW) { $script:ButtonMinW = 80 }
 # Top offset for inline copy URL button
 if (-not $script:ButtonCopyOffsetY) { $script:ButtonCopyOffsetY = -2 }
 # Button height big enough for the shield + breathing space
@@ -355,6 +349,7 @@ $script:I18N_Embedded_En = @'
 	"button.save": "Save",
 	"button.select": "Select",
 	"button.start_service": "Start service",
+	"button.triggerinfo": "Trigger info",
 	"button.uac_apply_changes": "Apply changes",
 	"button.uninstall": "Uninstall...",
 	"button.up": "Up",
@@ -362,6 +357,9 @@ $script:I18N_Embedded_En = @'
 	"combo.basic_auth_level_0": "0 - Disabled (no Basic at all)",
 	"combo.basic_auth_level_1": "1 - Basic over HTTPS only (recommended)",
 	"combo.basic_auth_level_2": "2 - Basic over HTTP or HTTPS (not recommended)",
+	"combo.webclient_start_automatic": "Automatic",
+	"combo.webclient_start_manual": "Manual",
+	"combo.webclient_start_disabled": "Disabled",
 	"hint.select_portable_folder": "Choose destination folder for portable package (select existing portable folder to update in place)",
 	"i18n.ok": "i18n initialized.",
 	"label.active_scope": "* The WebClient service has classified the current server as a '{zone}'",
@@ -383,7 +381,8 @@ $script:I18N_Embedded_En = @'
 	"label.send_receive_timeout": "Send receive timeout",
 	"label.server": "Server",
 	"label.server_not_found_cache_lifetime": "Server not found cache lifetime",	
-	"label.service_status": "Status of 'WebClient' service:",
+	"label.service_starttype": "Starttype",
+	"label.service_status": "WebClient service",
 	"label.subfolder": "Subfolder",
 	"label.user": "User",
 	"menu.about": "About...",
@@ -418,7 +417,8 @@ $script:I18N_Embedded_En = @'
 	"message.portable_package_updated": "Portable package updated at:\r\n{path}",
 	"message.send_receive_timeout_help": "Specifies the timeout in seconds that WebDAV the WebClient service uses after issuing a request, such as 'GET /file.ext' or 'PUT /file.ext'.\r\n\r\nThe default is 60",
 	"message.server_not_found_cache_lifetime_help": "Specifies the period of time in seconds that a server is cached as non-WebDAV by the WebClient service.\r\nNote: The WebClient service maintains a list of non-WebDAV servers that have been contacted. If the server is found in this list, a fail is returned immediately without attempting to contact the server.\r\n\r\nThe default is 60",
-	"message.service_webclient_disabled": "WebClient service is disabled. Mapping may fail.",
+	"message.service_trigger_info": "This trigger is configured to start the WebClient service:\r\nETW-provider-name:\r\n{name}\r\nETW-provider-UUID:\r\n{uuid}",
+	"message.service_webclient_disabled_use_tuning": "This App relies on the 'WebClient' service but its 'Starttype' is switched to 'Disabled'. It can not be startet as long as it is disabled. The service must and can be activated by switching the 'Starttype' to 'Manual' or 'Automatic' in the 'WebClient tuning'-tab of the settings window.",
 	"message.service_webclient_missing": "WebClient service missing.",
 	"message.store_password_failed": "Failed to store password: {err}",
 	"message.tuning_applied": "Successfully applied WebClient settings",
@@ -444,7 +444,13 @@ $script:I18N_Embedded_En = @'
 	"prompt.password_missing_quit" : "No stored password for {app}. Quit now?",
 	"prompt.secret_file_missing_quit": "Secret file is missing. Quit {app} now?",
 	"prompt.secrets_delete_confirm": "Delete secrets.dat?",
+	"prompt.service_webclient_start_now": "This App relies on the WebClient service but it is switched off. Do you want to start the service now?",
+	"prompt.start_disabled_warn": "This App relies on the WebClient service and will no longer work once the WebClient service is disabled..\r\nDo you really want to disable it?",
 	"prompt.unsaved_changes": "There are unsaved changes. Should these be saved before exiting?",
+	"status.not_found": "<not found>",
+	"status.pending": "working...",
+	"status.running": "running",
+	"status.stopped": "stopped",
 	"tab.basic_settings": "Basic settings",
 	"tab.webclient_tuning": "WebClient tuning",
 	"tip.basic_auth": "Using basic authentication on non-SSL connections can cause serious\r\nsecurity issues as the username/password are transmitted in clear text",
@@ -456,6 +462,7 @@ $script:I18N_Embedded_En = @'
 	"tip.local_server_timeout_help": "Specifies the connection timeout in seconds for the WebClient\nservice uses when communicating with a local WebDAV server",
 	"tip.send_receive_timeout_help": "Specifies the timeout in seconds that WebDAV the\nWebClient service uses after issuing a request",
 	"tip.server_not_found_cache_lifetime_help": "Specifies the period of time in seconds that a server\nis cached as non-WebDAV by the WebClient service",
+	"tip.service_status": "Status of 'WebClient' service: {status}",
 	"title.about": "About {app}",
 	"title.app_password_help": "How to create an app password",
 	"title.app_password_query": "{app}: app password query",
@@ -477,6 +484,7 @@ $script:I18N_Embedded_En = @'
 	"tray.password_missing" : "{app}: needs setup (password)",
 	"tray.paused": "{app}: {drive} disconnected (paused)",
 	"tray.secrets_missing": "{app}: portable secrets missing",
+	"tray.service_deactivated": "{app}: needs setup (service deactivated)",
 	"end.of.json": "dont touch this"
 }
 '@
@@ -495,7 +503,7 @@ function Convert-JsonToHashtable([string]$Json) {
 	return $ht
 }
 # Community packs: NDTi18n.<lang>.json (e.g., NDTi18n.de.json)
-function Resolve-I18nFilePath([string]$Lang) { return (Join-Path $HereDir ("i18n\{0}i18n.{1}.json" -f $AppNameShort, $Lang)) }
+function Resolve-I18nFilePath([string]$Lang) { Join-Path $HereDir ("i18n\{0}i18n.{1}.json" -f $AppNameShort, $Lang) }
 # Two-letter UI culture (e.g., 'de', 'en', 'fr')
 function Get-SystemLang2{ try { return [System.Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName } catch { return 'en' } }
 # Optional explicit lang (e.g., 'de'); if omitted, pick from State.Language or UI culture.
@@ -582,6 +590,7 @@ function Show-CustomMsgBoxT([string]$Key, [hashtable]$Vars = $null, [string]$Mod
 	$buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
 	$buttonPanel.Padding = New-Object System.Windows.Forms.Padding(0, 12, 0, 0)
 	$defaultBtn = $null; $cancelBtn = $null
+	$btnMinW = if ($script:ButtonMinW -is [int] -and $script:ButtonMinW -gt 0) { $script:ButtonMinW } else { 80 }
 	foreach ($bdef in $btnDefs) {
 		$btn = New-Object System.Windows.Forms.Button
 		$btn.AutoSize = $true; $btn.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowOnly
@@ -589,7 +598,7 @@ function Show-CustomMsgBoxT([string]$Key, [hashtable]$Vars = $null, [string]$Mod
 		$btn.Height = $script:ButtonXH
 		$btn.MaximumSize = New-Object System.Drawing.Size(0, $btn.Height)
 		$btn.Margin = New-Object System.Windows.Forms.Padding(6, 0, 0, 0)
-		$btn.Text = $bdef.Text; $btn.DialogResult = $bdef.Result
+		$btn.Text = $bdef.Text; $btn.DialogResult = $bdef.Result; $btn.MinimumSize = New-Object System.Drawing.Size($script:ButtonMinW, 0)
 		if ($bdef.Default) { $defaultBtn = $btn }; if ($bdef.Cancel) { $cancelBtn = $btn }; if ($shieldThis) { Enable-FlatUacShield $btn }
 		[void]$buttonPanel.Controls.Add($btn)
 	}
@@ -1191,15 +1200,6 @@ function Get-FavIconFilePath { return (Join-Path $HereDir 'server_favicon.ico') 
 # ================================================================ 
 #	WebDAV core (WebClient, host online, map secure)
 # ================================================================ 
-function Ensure-WebClient {
-	$svc = Get-Service -Name WebClient -ErrorAction SilentlyContinue
-	if (-not $svc) { Show-ErrorT 'message.service_webclient_missing'; exit 1 }
-	try {
-		$wmi = Get-CimInstance Win32_Service -Filter "Name = 'WebClient'" -ErrorAction SilentlyContinue
-		if ($wmi -and $wmi.StartMode -eq 'Disabled') { Show-WarnT 'message.service_webclient_disabled' }
-	} catch {}
-	return $true
-}
 function New-WebDavMapSecure([string]$drive, [string]$unc, [string]$user, [string]$pass, [switch]$Persist, [ref]$LastError) {
 	# Build NETRESOURCE
 	$nr = New-Object Nc.NetUse+NETRESOURCE
@@ -1497,7 +1497,9 @@ function Set-TrayState([string]$Text = $null, $Icon = $null) { if (-not $script:
 if ($null -eq $script:ResetRequested) { $script:ResetRequested = $false }
 if ($null -eq $script:MissingSecretsPrompted) { $script:MissingSecretsPrompted = $false }
 if ($null -eq $script:MissingPwdPrompted) { $script:MissingPwdPrompted = $false }
+if ($null -eq $script:WebClientServicePrompted) { $script:WebClientServicePrompted = $false }
 if ($null -eq $script:BasicAuthWarned) { $script:BasicAuthWarned = $false }
+if ($null -eq $script:ServiceDeactivated) { $script:ServiceDeactivated = $false }
 # Shows a small custom balloon near the mouse cursor (no dependencies).
 function Show-CustomBalloon([string]$Title, [string]$Text, [int]$TimeoutMs = 2200) {
 	Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing
@@ -1563,7 +1565,7 @@ function Show-CustomBalloon([string]$Title, [string]$Text, [int]$TimeoutMs = 220
 	$screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 	$posX = $screen.Right - $w - 10; $posY = $screen.Bottom - $h - 10
 	$f.Location = New-Object System.Drawing.Point($posX, $posY); $f.Location = New-Object System.Drawing.Point($posX, $posY)
-	# Close on click / mousedown / ESC (sender-basiert, kein $myForm, kein GetNewClosure)
+	# Close on click / mousedown / ESC (sender-based, no $myForm, no GetNewClosure)
 	$f.Add_Click({ param($s, $e) try { $s.Close() } catch {} }); $f.Add_MouseDown({ param($s, $e) try { $s.Close() } catch {} }); $f.KeyPreview = $true; $f.Add_KeyDown({ param($s, $e) if ($e.KeyCode -eq 'Escape') { try { $s.Close() } catch {} } })
 	# Auto-close via WinForms timer (UI-thread; safe with message pump)
 	$t = New-Object System.Windows.Forms.Timer; $t.Interval = [Math]::Max(500, $TimeoutMs)
@@ -1729,7 +1731,7 @@ function Test-IsPortableFolder {
 			if ($name -ieq ("{0}.vbs" -f $AppNameShort)) { return $true }
 			if ($name -ieq ("{0}_portable.json" -f $AppName)) { return $true }
 			if ($name -ieq ("{0}_secret.dat" -f $AppNameShort)) { return $true }
-			if ($name -ieq "NDT.ps1") { return $true }
+			if ($name -ieq ("{0}.ps1" -f $AppNameShort)) { return $true }
 		}
 		return $false
 	} catch { return $false }
@@ -1859,9 +1861,9 @@ function Export-To-Portable {
 			if ($ppRes -is [string]) { $ppVal = $ppRes } elseif ($ppRes -and ($ppRes.PSObject.Properties.Name -contains 'Value')) { $ppVal = $ppRes.Value }
 			if ([string]::IsNullOrWhiteSpace($ppVal)) { return }
 			# secret.dat
-			$secretPath = Join-Path $dstRoot ("{0}_secret.dat" -f $AppNameShort)
-			Write-Verbose ("Write secret -> {0}" -f $secretPath)
-			Protect-PortableSecret $pw $ppVal $secretPath
+			$destSecretPath = Join-Path $dstRoot ("{0}_secret.dat" -f $AppNameShort)
+			Write-Verbose ("Write secret -> {0}" -f $destSecretPath)
+			Protect-PortableSecret $pw $ppVal $destSecretPath
 		} else { Write-Verbose "Portable update/bare: keeping existing *_portable.json and *_secret.dat unchanged." } # Update path (or bare): never delete config/secret; just leave them as-is
 		# Launchers + README (always)
 		Write-Verbose "Write launchers/README..."
@@ -1941,8 +1943,7 @@ function Uninstall-Self {
 # ================================================================ 
 #	Settings dialog
 # ================================================================ 
-#function Show-SettingsWindow([string]$ConflictDrive) {
-function Show-SettingsDialog{
+function Show-SettingsDialog {
 	# Guard: prevent multiple settings windows
 	if ($script:IsSettingsOpen -and $script:SettingsForm -and (-not $script:SettingsForm.IsDisposed)) {
 		try { $script:SettingsForm.WindowState = [System.Windows.Forms.FormWindowState]::Normal; $script:SettingsForm.Activate(); $script:SettingsForm.BringToFront() } catch {}
@@ -1984,7 +1985,6 @@ function Show-SettingsDialog{
 	$script:IsSettingsOpen = $false
 	return $dlg
 }
-#function Render-BasicSettingsTab([System.Windows.Forms.Form]$HostForm, [string]$ConflictDrive) {
 function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null) {
 	# Use provided host form (container owns chrome)
 	$f = $script:HostForm
@@ -2299,17 +2299,6 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 	$script:CheckboxShortcutStartmenu = New-Object Windows.Forms.CheckBox; $script:CheckboxShortcutStartmenu.Text = (T 'box.shortcut_startmenu'); $script:CheckboxShortcutStartmenu.AutoSize = $true; $script:CheckboxShortcutStartmenu.Anchor = 'Top, Left'; $script:CheckboxShortcutStartmenu.Checked = (Shortcut-Exists 'StartMenu')
 	$script:CheckboxShortcutDesktop = New-Object Windows.Forms.CheckBox; $script:CheckboxShortcutDesktop.Text = (T 'box.shortcut_desktop'); $script:CheckboxShortcutDesktop.AutoSize = $true; $script:CheckboxShortcutDesktop.Anchor = 'Top, Left'; $script:CheckboxShortcutDesktop.Checked = (Shortcut-Exists 'Desktop')
 	[void]$PanelCheckboxes.Controls.Add($script:CheckboxAutostart, 0, 0); [void]$PanelCheckboxes.Controls.Add($script:CheckboxShortcutStartmenu, 1, 0); [void]$PanelCheckboxes.Controls.Add($script:CheckboxShortcutDesktop, 2, 0)
-	# --- Immediate apply on user click (installed mode only) ---
-	# define helper BEFORE wiring handlers, and in script-scope so handlers can call it
-	$script:ApplyShortcut = {
-		param([ValidateSet('RunKey','StartMenu','Desktop')][string]$Target, [bool]$Enable, [System.Windows.Forms.CheckBox]$Chk)
-		if ($PortableMode) { return }  # portable: these options are disabled anyway
-		try { if ($Target -eq 'RunKey') { Set-StartupRunKey $Enable } else { Ensure-Shortcut $Target $Enable } } catch {
-			# revert UI and show error
-			try { $Chk.Checked = -not $Enable } catch {}
-			try { Show-ErrorT 'message.operation_failed' @{ err = $_.Exception.Message } } catch {}
-		}
-	}
 	# Use Click (not CheckedChanged) so we don't fire during initialization
 	$script:CheckboxAutostart.Add_Click(({
 		# sender is the checkbox itself
@@ -2477,6 +2466,8 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		& $setTxt $script:LabelSendReceiveTimeout (T 'label.send_receive_timeout')
 		& $setTxt $script:LabelServerNotFoundCacheLifeTime (T 'label.server_not_found_cache_lifetime')
 		& $setTxt $script:LabelServiceStatus (T 'label.service_status')
+		& $setTxt $script:LabelServiceStartType (T 'label.service_starttype')
+		& $setTxt $script:ButtonServiceTriggerInfo (T 'button.triggerinfo')
 		& $setTxt $script:ButtonServiceStart (T 'button.start_service')
 		& $setTxt $script:ButtonServiceRestart (T 'button.restart_service')
 		& $setTxt $script:ButtonApplyAsAdmin (T 'button.uac_apply_changes')
@@ -2492,8 +2483,38 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		& $setTip $script:ButtonInternetServerTimeoutHelp 'tip.internet_server_timeout_help'
 		& $setTip $script:ButtonSendReceiveTimeoutHelp 'tip.send_receive_timeout_help'
 		& $setTip $script:ButtonServerNotFoundCacheLifeTimeHelp 'tip.server_not_found_cache_lifetime_help'
+		# --- Refresh i18n text in combo boxes ---
+		# BasicAuthLevel combo: rebuild items with new translations, keep selection
+		if ($script:ComboBoxBasicAuthLevel -is [System.Windows.Forms.ComboBox] -and -not $script:ComboBoxBasicAuthLevel.IsDisposed) {
+			$oldIdx = $script:ComboBoxBasicAuthLevel.SelectedIndex; $script:BalGuard = $true
+			try {
+				$script:ComboBoxBasicAuthLevel.Items.Clear()
+				[void]$script:ComboBoxBasicAuthLevel.Items.Add((T 'combo.basic_auth_level_0'))
+				[void]$script:ComboBoxBasicAuthLevel.Items.Add((T 'combo.basic_auth_level_1'))
+				[void]$script:ComboBoxBasicAuthLevel.Items.Add((T 'combo.basic_auth_level_2'))
+				if ($oldIdx -ge 0 -and $oldIdx -lt $script:ComboBoxBasicAuthLevel.Items.Count) { $script:ComboBoxBasicAuthLevel.SelectedIndex = $oldIdx }
+			}
+			finally { $script:BalGuard = $false }
+		}
+		# WebClient service start type combo: rebuild items with new translations, keep selection
+		if ($script:ComboServiceStartType -is [System.Windows.Forms.ComboBox] -and -not $script:ComboServiceStartType.IsDisposed) {
+			$oldIdx = $script:ComboServiceStartType.SelectedIndex
+			try {
+				$script:ComboServiceStartType.Items.Clear()
+				[void]$script:ComboServiceStartType.Items.Add((T 'combo.webclient_start_automatic'))
+				[void]$script:ComboServiceStartType.Items.Add((T 'combo.webclient_start_manual'))
+				[void]$script:ComboServiceStartType.Items.Add((T 'combo.webclient_start_disabled'))
+				if ($oldIdx -ge 0 -and $oldIdx -lt $script:ComboServiceStartType.Items.Count) { $script:ComboServiceStartType.SelectedIndex = $oldIdx }
+			} catch {}
+		}
+		# Ensure Apply button dirty state reflects the new texts / selections
+		if ($script:UpdateWebClientApplyButton -is [scriptblock]) { & $script:UpdateWebClientApplyButton }
 		# dynamic ToolTips (txtSub/txtPwd) and encrypt/clear button text
 		& $script:RefreshPasswordState
+		# re-apply dynamic WebClient status tooltip
+		$lastState = $null
+		if ($script:LabelServiceStatus -and $script:LabelServiceStatus.Tag) { $lastState = [string]$script:LabelServiceStatus.Tag.State }
+		if ($script:SetWebClientStatusLabel -is [scriptblock] -and -not [string]::IsNullOrWhiteSpace($lastState)) { & $script:SetWebClientStatusLabel $lastState }
 		# update tray/menu text if they already exist in the outer scope
 		if ($miMode) {
 			if ($PortableMode) { & $setTxt $miMode (T 'mode.portable'); if ($miMode.PSObject.Properties.Name -contains 'ForeColor') { $miMode.ForeColor = [System.Drawing.Color]::ForestGreen } }
@@ -2506,9 +2527,12 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		if ($miExit) { & $setTxt $miExit (T 'menu.exit') }
 		# update tray tooltip text, if tray already exists
 		if ($script:tray) {
-			if ($script:NeedsSetup) { $script:tray.Text = (T 'tray.needs_setup' @{ app = $AppName }) }
-			elseif ($script:Paused) { $script:tray.Text = (T 'tray.paused' @{ app = $AppName; drive = $State.Drive }) }
-			else { $script:tray.Text = (T 'tray.initializing' @{ app = $AppName }) }
+			# Refresh deactivated flag to avoid stale tooltip after tuning changes
+			Sync-WebClientDeactivatedFlag | Out-Null
+			if ($script:ServiceDeactivated) { $script:tray.Text = T 'tray.service_deactivated' @{ app = $AppName } }
+			elseif ($script:NeedsSetup) { $script:tray.Text = T 'tray.needs_setup' @{ app = $AppName } }
+			elseif ($script:Paused) { $script:tray.Text = T 'tray.paused' @{ app = $AppName; drive = $State.Drive } }
+			else { $script:tray.Text = T 'tray.initializing' @{ app = $AppName } }
 		}
 		# recompute active scope text after language change
 		if ($script:LabelActiveScope) { try { & $script:UpdateActiveScopeLabel $script:LabelActiveScope } catch { $script:LabelActiveScope.Visible = $false } }
@@ -2712,6 +2736,8 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		try { if ($script:FaviconTimer) { $script:FaviconTimer.Stop(); $script:FaviconTimer.Dispose() } } catch {}
 		try { if ($script:AvatarTimer) { $script:AvatarTimer.Stop(); $script:AvatarTimer.Dispose() } } catch {}
 		try { if ($script:ServerScopeTimer) { $script:ServerScopeTimer.Stop(); $script:ServerScopeTimer.Dispose() } } catch {}
+		# ensure WebClientRegTimer is fully stopped when settings dialog closes
+		try { if ($script:WebClientRegTimer) { $script:WebClientRegTimer.Stop(); $script:WebClientRegTimer.Dispose() } } catch {}
 		# break default buttons link to the form (defuse lingering refs)
 		try { $sender.AcceptButton = $null; $sender.CancelButton = $null } catch {}
 		# Dispose only the PictureBox-held clones; do NOT dispose global server/avatar bitmaps.
@@ -2728,7 +2754,6 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 			$script:ApplyLanguageNow = $null
 			$script:RefreshLangList = $null
 			$script:RebuildDriveList = $null
-			$script:ApplyShortcut = $null
 			$script:GetPendingConfig = $null
 			$script:HasUnsavedChanges = $null
 			$script:UpdateSaveButton = $null
@@ -2747,6 +2772,10 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 			$script:ButtonPasswordHelp = $null; $script:ButtonEncrypt = $null; $script:ButtonLanguageImport = $null; $script:ButtonSave = $null; $script:ButtonClose1 = $null
 			$script:PicFavicon = $null; $script:PicAvatar = $null
 			$script:FaviconTimer = $null; $script:AvatarTimer = $null
+			# drop WebClient tuning state so nothing pins the timer / closures
+			$script:WebClientRegTimer = $null
+			$script:UpdateWebClientRegView = $null
+			$script:UpdateWebClientApplyButton = $null
 			$script:Tabs = $null; $script:TabBasic = $null; $script:TabTuning = $null
 		} catch {}
 	})
@@ -2791,6 +2820,7 @@ try {
 		Write-Log ("Set {0} = {1}" -f `$name, `$ival)
 		& reg.exe ADD "`$keyReg" /v "`$name" /t REG_DWORD /d "`$ival" /f | Out-Null
 	}
+	`$startupType = `$null
 	if (`$data.PSObject.Properties.Name -contains 'BasicAuthLevel') { `$bal = [long]`$data.BasicAuthLevel; if (`$bal -lt 0) { `$bal = 0 }; if (`$bal -gt 2) { `$bal = 2 }; Set-DWord 'BasicAuthLevel' `$bal }
 	if (`$data.PSObject.Properties.Name -contains 'FileAttributesLimitInBytes') { Set-DWord 'FileAttributesLimitInBytes' `$data.FileAttributesLimitInBytes }
 	if (`$data.PSObject.Properties.Name -contains 'FileSizeLimitInBytes') { Set-DWord 'FileSizeLimitInBytes' `$data.FileSizeLimitInBytes }
@@ -2798,7 +2828,27 @@ try {
 	if (`$data.PSObject.Properties.Name -contains 'InternetServerTimeoutInSec') { Set-DWord 'InternetServerTimeoutInSec' `$data.InternetServerTimeoutInSec }
 	if (`$data.PSObject.Properties.Name -contains 'SendReceiveTimeoutInSec') { Set-DWord 'SendReceiveTimeoutInSec' `$data.SendReceiveTimeoutInSec }
 	if (`$data.PSObject.Properties.Name -contains 'ServerNotFoundCacheLifeTimeInSec') { Set-DWord 'ServerNotFoundCacheLifeTimeInSec' `$data.ServerNotFoundCacheLifeTimeInSec }
-	try { Write-Log 'Restart WebClient service'; Stop-Service WebClient -ErrorAction SilentlyContinue | Out-Null; Start-Service WebClient -ErrorAction SilentlyContinue | Out-Null } catch { Write-Log ("Service restart error: {0}" -f `$_.Exception.Message) }
+	# Optional: change startup type (Automatic / Manual / Disabled)
+	if (`$data.PSObject.Properties.Name -contains 'StartupType') {
+		try {
+			`$startupType = [string]`$data.StartupType
+			if ([string]::IsNullOrWhiteSpace(`$startupType)) { `$startupType = `$null }
+		} catch {
+			Write-Log ("StartupType parse failed: {0}" -f `$_.Exception.Message)
+			`$startupType = `$null
+		}
+		if (`$startupType) {
+			try {
+				Write-Log ("Set start type: {0}" -f `$startupType)
+				Set-Service -Name WebClient -StartupType `$startupType -ErrorAction Stop
+			} catch { Write-Log ("Failed to set start type: {0}" -f `$_.Exception.Message) }
+		}
+	}
+	try {
+		Write-Log 'Restart WebClient service'
+		Stop-Service WebClient -ErrorAction SilentlyContinue | Out-Null
+		if (-not `$startupType -or (`$startupType -ne 'Disabled')) { Start-Service WebClient -ErrorAction SilentlyContinue | Out-Null }
+	} catch { Write-Log ("Service restart error: {0}" -f `$_.Exception.Message) }
 	Write-Log 'Broker success'; exit 0
 }
 catch { Write-Log ("Broker error: {0}" -f `$_.Exception.Message); exit 1 }
@@ -2845,6 +2895,38 @@ function Invoke-WebClientServiceAction {
 	$psi.FileName = $pwsh; $psi.Arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"$cmd`""
 	$psi.Verb = 'runas'; $psi.UseShellExecute = $true; $psi.WindowStyle = 'Hidden'; $psi.CreateNoWindow = $true
 	try { $p = [Diagnostics.Process]::Start($psi); if ($NoWait) { return $true }; $p.WaitForExit(); return ($p.ExitCode -eq 0) } catch { return $false }
+}
+# Keeps script-level deactivated flag in sync with the current WebClient StartType
+function Sync-WebClientDeactivatedFlag {
+	param(
+		[System.ServiceProcess.ServiceController]$Service
+	)
+	try {
+		if (-not $Service) { $Service = Get-Service -Name WebClient -ErrorAction Stop }
+		$startRaw = [string]$Service.StartType
+		$script:ServiceDeactivated = ($startRaw -like 'Disabled*')
+		return $Service
+	} catch {
+		# Missing or inaccessible service -> treat as deactivated
+		$script:ServiceDeactivated = $true
+		return $null
+	}
+}
+function Get-WebClientTriggerInfoText {
+	[CmdletBinding()] param([string]$ServiceName = 'WebClient', [ValidateSet('String','Window')] [string]$Output = 'String')
+	try { $scOutput = & sc.exe qtriggerinfo $ServiceName 2>$null } catch { return $null }
+	if (-not $scOutput) { return $null }
+	$match = $scOutput | Select-String -Pattern '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' -AllMatches | Select-Object -First 1
+	if (-not $match -or -not $match.Matches.Count) { return $null }
+	$uuid = $match.Matches[0].Value.ToLower()
+	if (-not $uuid) { return $null }
+	$name = $uuid
+	try {
+		$keyPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Publishers\{$uuid}"
+		$val = (Get-Item $keyPath -ErrorAction Stop).GetValue('')
+		if ($val) { $name = [string]$val }
+	} catch {}
+	if ($Output -eq 'Window') { Show-InfoT 'message.service_trigger_info' @{ name = $name; uuid = $uuid } } else { return "Trigger: $name ($uuid)" }
 }
 function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.TabPage]$HostTab) {
 	# --- Read current registry values (no elevation to read) ---
@@ -2970,20 +3052,90 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 	))
 	try { & $script:UpdateActiveScopeLabel $lblSco } catch { $lblSco.Visible = $false }
 	$t.Controls.Add($grpTo)
-	# --- Group: WebClient service (status-only) ---
+	# --- Group: WebClient service ---
 	$grpSvc = New-Object Windows.Forms.Panel; $grpSvc.Left = 8; $grpSvc.Top = $grpTo.Bottom + 8; $grpSvc.Width = $t.ClientSize.Width - 16; $grpSvc.Height = 78; $grpSvc.Anchor = 'Top, Left, Right'
-	$lblSvc = $script:LabelServiceStatus = New-Object Windows.Forms.Label; $lblSvc.Text = (T 'label.service_status'); $lblSvc.Left = 12; $lblSvc.Top = 8; $lblSvc.AutoSize = $true
-	$valSvc = $script:valSvc = New-Object Windows.Forms.Label; $valSvc.Left = $cmbBAL.Left; $valSvc.Top = $lblSvc.Top; $valSvc.AutoSize = $true; $valSvc.Anchor = 'Top, Right'
+	$lblSvc = $script:LabelServiceStatus = New-Object Windows.Forms.Label
+	$lblSvc.Left = 12; $lblSvc.Top = 8; $lblSvc.AutoSize = $true; $lblSvc.Anchor = 'Top, Left'
+	$lblSvc.Padding = New-Object System.Windows.Forms.Padding(0,0,22,0) # reserve some space for LED
+	$lblSvc.Text = (T 'label.service_status')
+	# draw traffic-light LED after the label text
+	$lblSvc.add_Paint({
+		param($sender, $e)
+		try {
+			$lbl = [System.Windows.Forms.Label]$sender; $g = $e.Graphics; $text = $lbl.Text
+			if ([string]::IsNullOrEmpty($text)) { return }
+			# measure text in current font
+			$textSize = $g.MeasureString($text, $lbl.Font)
+			# LED size
+			$diam = [float]([Math]::Ceiling($lbl.Font.Height * 0.85))
+			$y = ($lbl.Height - $diam) / 2 - 1 # move LED a bit up
+			# a bit more distance from text
+			$x = [Math]::Ceiling($textSize.Width) + 8
+			if ($x + $diam -gt $lbl.Width) { $x = $lbl.Width - $diam - 2 }
+			# colors from Tag (SetWebClientStatusLabel)
+			$fillColor = [System.Drawing.Color]::DarkGray
+			$borderColor = [System.Drawing.Color]::Black
+			$state = $null
+			if ($lbl.Tag) { if ($lbl.Tag.Color) { $fillColor = $lbl.Tag.Color }; if ($lbl.Tag.BorderColor) { $borderColor = $lbl.Tag.BorderColor }; if ($lbl.Tag.State) { $state = $lbl.Tag.State } }
+			$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+			# filled LED
+			$brushDot = New-Object System.Drawing.SolidBrush($fillColor); $g.FillEllipse($brushDot, $x, $y, $diam, $diam); $brushDot.Dispose()
+			# outline so it is clearly visible
+			$penBorder = New-Object System.Drawing.Pen($borderColor, 1.2); $g.DrawEllipse($penBorder, $x, $y, $diam, $diam); $penBorder.Dispose()
+			# for "<not found>" draw a white cross inside the red LED
+			if ($state -eq '<not found>') {
+				$penX = New-Object System.Drawing.Pen([System.Drawing.Color]::White, 1.4)
+				$margin = 3
+				$g.DrawLine($penX, $x + $margin, $y + $margin, $x + $diam - $margin, $y + $diam - $margin)
+				$g.DrawLine($penX, $x + $diam - $margin, $y + $margin, $x + $margin, $y + $diam - $margin)
+				$penX.Dispose()
+			}
+		} catch {}
+	})
+	$lblST = $script:LabelServiceStartType = New-Object Windows.Forms.Label; $lblST.Text = (T 'label.service_starttype')
+	$lblST.Left = $cmbBAL.Left - 55; $lblST.Top = $lblSvc.Top; $lblST.AutoSize = $true; $lblST.Anchor = 'Top, Right'
+	# Trigger info button below start type
+	$btnTrig = $script:ButtonServiceTriggerInfo = New-Object Windows.Forms.Button; $btnTrig.Text = (T 'button.triggerinfo')
+	$btnTrig.Width = 170; $btnTrig.Height = $script:ButtonH; $btnTrig.Left = $grpSvc.Width - $btnTrig.Width; $btnTrig.Top = $lblSvc.Top - 6; $btnTrig.Anchor = 'Top, Right'
+	$btnTrig.Visible = $false
+	$btnTrig.Add_Click({ Get-WebClientTriggerInfoText -ServiceName 'WebClient' -Output 'Window' })
+	# Startup type combo (Automatic / Manual / Disabled)
+	$cmbSvc = $script:ComboServiceStartType = New-Object Windows.Forms.ComboBox
+	$cmbSvc.Left = $cmbBAL.Left + 60; $cmbSvc.Width = $btnTrig.Left - $cmbSvc.Left - 10; $cmbSvc.Top = $lblSvc.Top - 4
+	$cmbSvc.DropDownStyle = 'DropDownList'; $cmbSvc.Anchor = 'Top, Right'
+	# Fixed order: 0 = Automatic, 1 = Manual, 2 = Disabled
+	[void]$cmbSvc.Items.Add((T 'combo.webclient_start_automatic'))
+	[void]$cmbSvc.Items.Add((T 'combo.webclient_start_manual'))
+	[void]$cmbSvc.Items.Add((T 'combo.webclient_start_disabled'))
+	$script:SvcStartPrevIdx = 0
+	$cmbSvc.add_SelectedIndexChanged({
+		$idx = $this.SelectedIndex
+		# Determine current real service start type
+		$startIsDisabled = $false
+		try { $svc = Get-Service -Name WebClient -ErrorAction Stop; $startRaw = [string]$svc.StartType; if ($startRaw -like 'Disabled*') { $startIsDisabled = $true } } catch { $startIsDisabled = $false }
+		if ($idx -eq 2) {
+			# Only warn if the IS state is NOT already Disabled
+			if (-not $startIsDisabled) {
+				$ans = Ask-YesNoWarnT 'prompt.start_disabled_warn'
+				# Revert to previous index
+				if ($ans -ne [System.Windows.Forms.DialogResult]::Yes) { if ($script:SvcStartPrevIdx -ge 0 -and $script:SvcStartPrevIdx -lt $this.Items.Count) { $this.SelectedIndex = $script:SvcStartPrevIdx }; return }
+			}
+			$script:SvcStartPrevIdx = $idx
+		} else { $script:SvcStartPrevIdx = $idx }
+		if ($script:UpdateWebClientApplyButton -is [scriptblock]) { & $script:UpdateWebClientApplyButton }
+	}.GetNewClosure())
 	# Buttons share the same position and toggle visibility depending on service state
-	$btnSvcRestart = $script:ButtonServiceRestart = New-Object Windows.Forms.Button; $btnSvcRestart.Text = (T 'button.restart_service'); $btnSvcRestart.Top = 38; $btnSvcRestart.Left = 8; $btnSvcRestart.Height = $script:ButtonXH; $btnSvcRestart.AutoSize = $true; $btnSvcRestart.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
-	$btnSvcStart = $script:ButtonServiceStart = New-Object Windows.Forms.Button; $btnSvcStart.Text = (T 'button.start_service'); $btnSvcStart.Top = 38; $btnSvcStart.Left = 8; $btnSvcStart.Height = $script:ButtonXH; $btnSvcStart.AutoSize = $true; $btnSvcStart.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
-	$grpSvc.Controls.AddRange(@($lblSvc, $valSvc, $btnSvcRestart, $btnSvcStart))
+	$btnSvcRestart = $script:ButtonServiceRestart = New-Object Windows.Forms.Button; $btnSvcRestart.Text = (T 'button.restart_service'); $btnSvcRestart.Top = 38; $btnSvcRestart.Left = 12; $btnSvcRestart.Height = $script:UacButtonH; $btnSvcRestart.AutoSize = $true; $btnSvcRestart.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+	$btnSvcStart = $script:ButtonServiceStart = New-Object Windows.Forms.Button; $btnSvcStart.Text = (T 'button.start_service'); $btnSvcStart.Top = 38; $btnSvcStart.Left = 12; $btnSvcStart.Height = $script:UacButtonH; $btnSvcStart.AutoSize = $true; $btnSvcStart.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+	$grpSvc.Controls.AddRange(@($lblSvc, $lblST, $cmbSvc, $btnTrig, $btnSvcRestart, $btnSvcStart))
 	$t.Controls.Add($grpSvc)
 	# --- script-scoped async invoker with live polling (no extra runspace) ---
 	$script:InvokeWebClientActionAsync = {
 		param([ValidateSet('start', 'restart')][string]$Action)
+		# mark that we are driving the service state ourselves
+		$script:SvcActionPending = $true
 		# immediate visual feedback (safe guards)
-		if ($script:valSvc -is [Windows.Forms.Label] -and -not $script:valSvc.IsDisposed) { if ($Action -eq 'restart') { $script:valSvc.Text = 'StopPending' } else { $script:valSvc.Text = 'StartPending' } }
+		if ($script:SetWebClientStatusLabel -is [scriptblock]) { $st = if ($Action -eq 'restart') { 'StopPending' } else { 'StartPending' }; & $script:SetWebClientStatusLabel $st }
 		if ($script:ButtonServiceStart -is [Windows.Forms.Button] -and -not $script:ButtonServiceStart.IsDisposed) { $script:ButtonServiceStart.Visible = $false }
 		if ($script:ButtonServiceRestart -is [Windows.Forms.Button] -and -not $script:ButtonServiceRestart.IsDisposed) { $script:ButtonServiceRestart.Visible = $false }
 		# live polling while elevated action runs
@@ -2991,15 +3143,19 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 		$poll.add_Tick({
 			try {
 				$st = (Get-Service -Name WebClient -ErrorAction Stop).Status.ToString()
-				if ($script:valSvc -is [Windows.Forms.Label] -and -not $script:valSvc.IsDisposed) { $script:valSvc.Text = $st }
-			} catch {
-				if ($script:valSvc -is [Windows.Forms.Label] -and -not $script:valSvc.IsDisposed) { $script:valSvc.Text = '<not found>' }
-			}
+				if ($script:SetWebClientStatusLabel -is [scriptblock]) { & $script:SetWebClientStatusLabel $st }
+			} catch { if ($script:SetWebClientStatusLabel -is [scriptblock]) { & $script:SetWebClientStatusLabel '<not found>' } }
 		})
 		$poll.Start()
 		# launch elevation without waiting (lets UAC appear; UI stays responsive)
 		$launched = Invoke-WebClientServiceAction $Action -NoWait
-		if (-not $launched) { try { $poll.Stop(); $poll.Dispose() } catch {}; & $script:UpdateSvc; try { Show-ErrorT 'message.uac_admin_required' } catch {}; return }
+		if (-not $launched) {
+			try { $poll.Stop(); $poll.Dispose() } catch {}
+			$script:SvcActionPending = $false
+			& $script:UpdateSvc
+			try { Show-ErrorT 'message.uac_admin_required' } catch {}
+			return
+		}
 		# stop polling when state stabilizes
 		$stopper = New-Object System.Windows.Forms.Timer; $stopper.Interval = 1000
 		$stopper.add_Tick({
@@ -3008,26 +3164,87 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 				if ($st -in [System.ServiceProcess.ServiceControllerStatus]::Running, [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
 					try { if ($poll) { $poll.Stop(); $poll.Dispose(); $poll = $null } } catch {}
 					try { if ($stopper) { $stopper.Stop(); $stopper.Dispose(); $stopper = $null } } catch {}
+					$script:SvcActionPending = $false
 					& $script:UpdateSvc
 				}
 			} catch {
 				try { if ($poll) { $poll.Stop(); $poll.Dispose(); $poll = $null } } catch {}
 				try { if ($stopper) { $stopper.Stop(); $stopper.Dispose(); $stopper = $null } } catch {}
+				$script:SvcActionPending = $false
 				& $script:UpdateSvc
 			}
 		})
 		$stopper.Start()
 	}
+	# small helper: map WebClient state to LED color + tooltip
+	$script:SetWebClientStatusLabel = {
+		param([string]$stateText)
+		try {
+			if ($script:LabelServiceStatus -is [Windows.Forms.Label] -and -not $script:LabelServiceStatus.IsDisposed) {
+				# saturated LED colors
+				$greenFill = [System.Drawing.Color]::FromArgb(0, 255, 0); $greenBorder = [System.Drawing.Color]::FromArgb(0, 120, 0)
+				$redFill = [System.Drawing.Color]::FromArgb(255, 0, 0); $redBorder = [System.Drawing.Color]::FromArgb(120, 0, 0)
+				$orangeFill = [System.Drawing.Color]::FromArgb(255, 165, 0); $orangeBorder = [System.Drawing.Color]::FromArgb(180, 90, 0)
+				$defaultBorder = [System.Drawing.Color]::FromArgb(40, 40, 40); $fillColor = [System.Drawing.Color]::DarkGray; $borderColor = $defaultBorder
+				switch ($stateText) {
+					'Running' { $fillColor = $greenFill; $borderColor = $greenBorder; break; }
+					'Stopped' { $fillColor = $redFill; $borderColor = $redBorder; break }
+					'<not found>' { $fillColor = $redFill; $borderColor = $redBorder; break }
+					default { if ($stateText -like '*Pending' -or $stateText -eq 'Paused') { $fillColor = $orangeFill; $borderColor = $orangeBorder } break }
+				}
+				# store for Paint handler
+				$script:LabelServiceStatus.Tag = [pscustomobject]@{ Color = $fillColor; BorderColor = $borderColor; State = $stateText }
+				$script:LabelServiceStatus.Invalidate()
+				# localized status text for tooltip
+				$locStatus = switch ($stateText) { 'Running' { T 'status.running' }; 'Stopped' { T 'status.stopped' }; '<not found>' { T 'status.not_found' }; default { T 'status.pending' } }
+				# tooltip shows full localized state text
+				if ($script:Tip) { $script:Tip.SetToolTip( $script:LabelServiceStatus, (T 'tip.service_status' @{ status = $locStatus }) ) }
+			}
+		} catch {}
+	}
 	$script:UpdateSvc = {
 		try {
-			$s = Get-Service -Name WebClient -ErrorAction Stop
+			# Sync script-level flag and reuse returned service object
+			$s = Sync-WebClientDeactivatedFlag
+			if (-not $s) { throw 'WebClient service not available' }
 			$state = [string]$s.Status
-			if ($script:valSvc -is [Windows.Forms.Label] -and -not $script:valSvc.IsDisposed) { $script:valSvc.Text = $state }
-			if ($script:ButtonServiceStart -is [Windows.Forms.Button] -and -not $script:ButtonServiceStart.IsDisposed) { $script:ButtonServiceStart.Visible = ($state -ne 'Running') }
-			if ($script:ButtonServiceRestart -is [Windows.Forms.Button] -and -not $script:ButtonServiceRestart.IsDisposed) { $script:ButtonServiceRestart.Visible = ($state -eq 'Running') }
-		} catch {
-			if ($script:valSvc -is [Windows.Forms.Label] -and -not $script:valSvc.IsDisposed) { $script:valSvc.Text = '<not found>' }
-			if ($script:ButtonServiceStart -is [Windows.Forms.Button] -and -not $script:ButtonServiceStart.IsDisposed) { $script:ButtonServiceStart.Visible = $true }
+			$startRaw = [string]$s.StartType; $startMode = 'Manual'
+			# Normalize startup mode to Automatic / Manual / Disabled
+			switch -Regex ($startRaw) { '^Automatic' { $startMode = 'Automatic'; break }; '^Disabled' { $startMode = 'Disabled'; break }; default { $startMode = 'Manual'; break } }
+			# Status label with placeholder (centralized helper)
+			if ($script:SetWebClientStatusLabel -is [scriptblock]) { & $script:SetWebClientStatusLabel $state }
+			# Startup-type combo + trigger button visibility
+			if ($cmbSvc -and -not $cmbSvc.IsDisposed) {
+				$hasTrigger = Test-Path $($RegWebClient -replace 'Parameters', 'TriggerInfo')
+				if ($btnTrig -and -not $btnTrig.IsDisposed) { $btnTrig.Visible = $hasTrigger }
+				# Map normalized start mode to fixed index: 0 = Automatic, 1 = Manual, 2 = Disabled
+				$idx = switch ($startMode) { 'Automatic' { 0 }; 'Disabled' { 2 }; default { 1 } }
+				if ($idx -ge 0 -and $idx -lt $cmbSvc.Items.Count) { $cmbSvc.SelectedIndex = $idx; $script:SvcStartPrevIdx = $idx } else { $cmbSvc.SelectedIndex = -1 }
+			}
+			# Keep global "service deactivated" flag in sync with startup mode
+			$wasDeactivated = [bool]$script:ServiceDeactivated
+			$nowDeactivated = ($startMode -eq 'Disabled')
+			$script:ServiceDeactivated = $nowDeactivated
+			if ($nowDeactivated -and -not $wasDeactivated) {
+				# Service has just been disabled -> unmap drive and show dedicated tray state
+				try { Unmap-DriveIfOurs -Force -RemoveProfile } catch {}
+				try { if ($script:tray) { $script:tray.Icon = $script:icoWarn; $script:tray.Text = T 'tray.service_deactivated' @{ app = $AppName } } } catch {}
+			}
+			# Service control buttons: respect StartType
+			if ($script:ButtonServiceStart -is [Windows.Forms.Button] -and -not $script:ButtonServiceStart.IsDisposed) {
+				# Show Start but gray it out while service is disabled
+				if ($startMode -eq 'Disabled') { $script:ButtonServiceStart.Visible = $true; $script:ButtonServiceStart.Enabled = $false }
+				else { $script:ButtonServiceStart.Visible = ($state -ne 'Running'); $script:ButtonServiceStart.Enabled = $true }
+			}
+			if ($script:ButtonServiceRestart -is [Windows.Forms.Button] -and -not $script:ButtonServiceRestart.IsDisposed) {
+				# No restart when the service is disabled
+				if ($startMode -eq 'Disabled') { $script:ButtonServiceRestart.Visible = $false } else { $script:ButtonServiceRestart.Visible = ($state -eq 'Running') }
+			}
+		}
+		catch {
+			if ($script:SetWebClientStatusLabel -is [scriptblock]) { & $script:SetWebClientStatusLabel '<not found>' }
+			if ($cmbSvc -and -not $cmbSvc.IsDisposed) { $cmbSvc.SelectedIndex = -1 }
+			if ($script:ButtonServiceStart -is [Windows.Forms.Button] -and -not $script:ButtonServiceStart.IsDisposed) { $script:ButtonServiceStart.Visible = $true; $script:ButtonServiceStart.Enabled = $false }
 			if ($script:ButtonServiceRestart -is [Windows.Forms.Button] -and -not $script:ButtonServiceRestart.IsDisposed) { $script:ButtonServiceRestart.Visible = $false }
 		}
 	}
@@ -3046,12 +3263,15 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 			if (-not $btnApply -or $btnApply.IsDisposed) { return }
 			# Read current registry snapshot
 			try { $curNow = Get-ItemProperty -Path $RegWebClient -ErrorAction Stop } catch { $curNow = $null }
-			$raw = {
-				param($n, $def, $src)
-				if ($src -and ($src.PSObject.Properties.Name -contains $n)) { try { return [int64]$src.$n } catch { return $def } }
-				return $def
-			}
+			$raw = { param($n, $def, $src); if ($src -and ($src.PSObject.Properties.Name -contains $n)) { try { return [int64]$src.$n } catch { return $def } }; return $def }
 			$maxDword = [uint32]::MaxValue
+			# Service startup type (service side)
+			$startReg = $null
+			try {
+				$s = Get-Service -Name WebClient -ErrorAction Stop
+				$startRaw = [string]$s.StartType
+				switch -Regex ($startRaw) { '^Automatic' { $startReg = 'Automatic'; break }; '^Disabled' { $startReg = 'Disabled'; break }; default { $startReg = 'Manual'; break } }
+			} catch { $startReg = $null }
 			# Registry side (canonical 32-bit range)
 			$balReg = [int]   (& $raw 'BasicAuthLevel' $v_BasicAuthLevel $curNow)
 			$attrReg = [int64] (& $raw 'FileAttributesLimitInBytes' $v_FileAttributesLimitInBytes $curNow)
@@ -3069,14 +3289,19 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 			if ($attrUi -gt $maxDword) { $attrUi = [int64]$maxDword }
 			if ($cmbFSL.SelectedIndex -ge 0) { $sizeUi = [int64]$steps[$cmbFSL.SelectedIndex] } else { $sizeUi = [int64]$steps[0] }
 			if ($sizeUi -gt $maxDword) { $sizeUi = [int64]$maxDword }
-			$locUi = [int]$numLoc.Value; $intUi = [int]$numInt.Value; $srUi = [int]$numSR.Value; $nfUi = [int]$numC.Value; $dirty = $false
+			$locUi = [int]$numLoc.Value; $intUi = [int]$numInt.Value; $srUi = [int]$numSR.Value; $nfUi = [int]$numC.Value
+			# Startup type from UI combo (fixed index mapping)
+			$startUi = $null
+			if ($cmbSvc -and -not $cmbSvc.IsDisposed -and $cmbSvc.SelectedIndex -ge 0) { $idxStart = $cmbSvc.SelectedIndex; $startUi = switch ($idxStart) { 0 { 'Automatic' }; 1 { 'Manual' }; 2 { 'Disabled' }; default { $null } } }
+			$dirty = $false
 			if ($balReg -ne $balUi) { $dirty = $true } elseif ($attrReg -ne $attrUi) { $dirty = $true } elseif ($sizeReg -ne $sizeUi) { $dirty = $true } elseif ($locReg -ne $locUi) { $dirty = $true } elseif ($intReg -ne $intUi) { $dirty = $true } elseif ($srReg -ne $srUi) { $dirty = $true } elseif ($nfReg -ne $nfUi) { $dirty = $true }
+			elseif ($startReg -ne $startUi -and $startReg -ne $null -and $startUi -ne $null) { $dirty = $true }
 			$btnApply.Enabled = $dirty
 		} catch {}
 	}.GetNewClosure()
 	# Initial evaluation
 	if ($script:UpdateWebClientApplyButton -is [scriptblock]) { & $script:UpdateWebClientApplyButton }
-	$null = $btnSvcStart.Handle; Enable-FlatUacShield $btnSvcStart; $null = $btnSvcRestart.Handle; Enable-FlatUacShield $btnSvcRestart; $null = $btnApply.Handle; Enable-UacShield $btnApply
+	$null = $btnSvcStart.Handle; Enable-UacShield $btnSvcStart; $null = $btnSvcRestart.Handle; Enable-UacShield $btnSvcRestart; $null = $btnApply.Handle; Enable-UacShield $btnApply
 	# updater (script-scoped so event handlers can call it later)
 	$btnSvcStart.Add_Click({ & $script:InvokeWebClientActionAsync -Action 'start' })
 	$btnSvcRestart.Add_Click({ & $script:InvokeWebClientActionAsync -Action 'restart' })
@@ -3095,8 +3320,15 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 		if ($script:LabelServerNotFoundCacheLifeTimeCur -and -not $script:LabelServerNotFoundCacheLifeTimeCur.IsDisposed) { $v = & $raw 'ServerNotFoundCacheLifeTimeInSec' $v_NotFoundCacheLifetimeInSec $curNow; $script:LabelServerNotFoundCacheLifeTimeCur.Text = & $fmt $v }
 	}
 	$script:WebClientRegTimer = New-Object System.Windows.Forms.Timer; $script:WebClientRegTimer.Interval = 800
-	$script:WebClientRegTimer.add_Tick({ & $script:UpdateWebClientRegView; if ($script:UpdateWebClientApplyButton -is [scriptblock]) { & $script:UpdateWebClientApplyButton } })
-	$script:WebClientRegTimer.Start(); & $script:UpdateWebClientRegView
+	$script:WebClientRegTimer.add_Tick({
+		& $script:UpdateWebClientRegView
+		if ($script:UpdateWebClientApplyButton -is [scriptblock]) { & $script:UpdateWebClientApplyButton }
+		# keep service LED + buttons in sync with real service state, but do not interfere while a Start/Restart action is pending
+		if (-not $script:SvcActionPending -and ($script:UpdateSvc -is [scriptblock])) { & $script:UpdateSvc }
+	})
+	$script:WebClientRegTimer.Start()
+	& $script:UpdateWebClientRegView
+	& $script:UpdateSvc
 	# Apply handler -> elevate via broker
 	$btnApply.Add_Click({
 		# Map current UI state to registry payload
@@ -3109,7 +3341,17 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 		# Map selected step to bytes
 		if ($cmbFSL.SelectedIndex -ge 0) { $limitSize = [int64]$steps[$cmbFSL.SelectedIndex] } else { $limitSize = [int64]$steps[0] }
 		if ($limitSize -gt $maxDword) { $limitSize = [int64]$maxDword }
+		# Startup type from UI (Automatic / Manual / Disabled) – same index pattern as BasicAuth
+		$startupMode = $null; $idxStart = $null
+		if ($cmbSvc -and -not $cmbSvc.IsDisposed -and $cmbSvc.SelectedIndex -ge 0) { $idxStart = $cmbSvc.SelectedIndex; $startupMode = switch ($idxStart) { 0 { 'Automatic' }; 1 { 'Manual' }; 2 { 'Disabled' }; default { $null } } }
+		# If startup type will change from enabled (Automatic/Manual) to Disabled, unmap the WebDAV drive once (without putting the app into "paused" state).
+		if ($startupMode -eq 'Disabled') {
+			$startIsDisabled = $false
+			try { $svc = Get-Service -Name WebClient -ErrorAction Stop; $startRaw = [string]$svc.StartType; if ($startRaw -like 'Disabled*') { $startIsDisabled = $true } } catch { $startIsDisabled = $false }
+			if (-not $startIsDisabled) { try { Unmap-DriveIfOurs -Force -RemoveProfile } catch {} }
+		}
 		$new = @{ BasicAuthLevel = [int]$bal; FileAttributesLimitInBytes = $limitAttr; FileSizeLimitInBytes = $limitSize; LocalServerTimeoutInSec = [int]$numLoc.Value; InternetServerTimeoutInSec = [int]$numInt.Value; SendReceiveTimeoutInSec = [int]$numSR.Value; ServerNotFoundCacheLifeTimeInSec = [int]$numC.Value }
+		if ($startupMode) { $new.StartupType = $startupMode }
 		if (Invoke-WebClientWriteBroker $new) {
 			try { Show-InfoT 'message.tuning_applied' } catch {}
 			try { & $script:UpdateSvc } catch {}
@@ -3122,7 +3364,6 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 	$t.add_Disposed({
 		try {
 			$script:UpdateSvc = $null
-			$script:valSvc = $null
 			$script:ButtonServiceStart = $null
 			$script:ButtonServiceRestart = $null
 			$script:LabelBasicAuthLevel = $null
@@ -3130,12 +3371,13 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 			$script:LabelFilesPerFolder = $null
 			$script:LabelFileSizeLimit = $null
 			$script:LabelActiveScope = $null
-			$script:lblZon = $null
 			$script:LabelLocalServerTimeout = $null
 			$script:LabelInternetServerTimeout = $null
 			$script:LabelSendReceiveTimeout = $null
 			$script:LabelServerNotFoundCacheLifeTime = $null
 			$script:LabelServiceStatus = $null
+			$script:LabelServiceStartType = $null
+			$script:ButtonServiceTriggerInfo = $null
 			$script:ButtonLocalServerTimeoutHelp = $null
 			$script:ButtonInternetServerTimeoutHelp = $null
 			$script:ButtonSendReceiveTimeoutHelp = $null
@@ -3148,6 +3390,8 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 			$script:lblFALCur = $null; $script:lblFSLCur = $null
 			$script:LabelLocalServerTimeoutCur = $null; $script:LabelInternetServerTimeoutCur = $null; $script:LabelSendReceiveTimeoutCur = $null; $script:LabelServerNotFoundCacheLifeTimeCur = $null
 			$script:UpdateWebClientApplyButton = $null
+			$script:SetWebClientStatusLabel = $null
+			$script:SvcStartPrevIdx = $null
 		} catch {}
 	})
 }
@@ -3276,7 +3520,25 @@ Ensure-SingleInstanceForConfig
 
 # --- Guard the drive letter from this config ---
 if (Test-ValidDrive $State.Drive) { Ensure-DriveGuard -Drive $State.Drive }
-Ensure-WebClient
+
+# --- WebClient presence + one-time hint/start (depends on startup mode) ---
+$svc = Get-Service -Name WebClient -ErrorAction SilentlyContinue
+if (-not $svc) { Show-ErrorT 'message.service_webclient_missing'; exit 1 }
+$startMode = switch -Regex ([string]$svc.StartType) { '^Automatic' { 'Automatic' }; '^Disabled' { 'Disabled' }; default { 'Manual' } }
+$hasTrigger = Test-Path ($RegWebClient -replace 'Parameters', 'TriggerInfo')
+if (-not $script:WebClientServicePrompted) {
+	$script:WebClientServicePrompted = $true
+	# Service is deactivated -> for informational purposes only, activation is done via the WebClient tuning tab (Broker)
+	if ($startMode -eq 'Disabled') {
+		$script:ServiceDeactivated = $true
+		Show-WarnT 'message.service_webclient_disabled_use_tuning'
+	}
+	elseif ($startMode -eq 'Manual' -and -not $hasTrigger) {
+		# Manually without trigger -> Offer to start the service once (but DO NOT activate it)
+		$ans = Ask-YesNoWarnT 'prompt.service_webclient_start_now' -Uac
+		if ($ans -eq [System.Windows.Forms.DialogResult]::Yes -and -not (Invoke-WebClientServiceAction 'start')) { Show-ErrorT 'message.service_webclient_start_failed' }
+	}
+}
 
 # BasicAuth = 0 -> one-time warning/fix prompt (before NeedsSetup / Tray)
 if (-not $script:BasicAuthWarned) {
@@ -3305,8 +3567,9 @@ $script:icoWarn = New-StatusIcon '!' ([System.Drawing.Color]::Goldenrod)
 $script:icoRed = New-StatusIcon $label ([System.Drawing.Color]::Tomato)
 $script:icoGre = New-StatusIcon $label ([System.Drawing.Color]::LimeGreen)
 $script:tray.Visible = $true
-if ($script:NeedsSetup) { $script:tray.Icon = $script:icoWarn; $script:tray.Text = (T 'tray.needs_setup' @{ app = $AppName }) }
-else { $script:tray.Icon = $script:icoRed; $script:tray.Text = (T 'tray.initializing' @{ app = $AppName }) }
+if ($script:ServiceDeactivated) { $script:tray.Icon = $script:icoWarn; $script:tray.Text = T 'tray.service_deactivated' @{ app = $AppName } }
+elseif ($script:NeedsSetup) { $script:tray.Icon = $script:icoWarn; $script:tray.Text = T 'tray.needs_setup' @{ app = $AppName } }
+else { $script:tray.Icon = $script:icoRed; $script:tray.Text = T 'tray.initializing' @{ app = $AppName } }
 if ($script:NeedsSetup) { Write-Verbose 'First run detected -> opening Settings dialog immediately.'; [void](Show-SettingsDialog); Refresh-NeedsSetup } # Re-evaluate after dialog
 $script:MainMutexName = "Local\${AppName}Main-$PID"
 try { $script:mainMutex = New-Object System.Threading.Mutex($true, $script:MainMutexName) } catch { $script:mainMutex = $null }
@@ -3326,7 +3589,7 @@ if ($PortableMode -and (Test-Path $SecretPath) -and (-not $script:AskedPassphras
 		}
 		try { $script:PlainPassCache = Unprotect-PortableSecret $result $SecretPath; $script:AskedPassphrase = $true; break } catch { Show-WarnT 'message.passphrase_wrong_or_corrupt' } # Loop continues -> prompt again
 	}
-	if ($script:ResetRequested) {; $script:ResetRequested = $false; [void](Show-SettingsDialog) }
+	if ($script:ResetRequested) { $script:ResetRequested = $false; [void](Show-SettingsDialog) }
 }
 if (-not (Ensure-ConfiguredFolderOrExit)) { return }
 
@@ -3348,18 +3611,29 @@ $miExit = $menu.Items.Add((T 'menu.exit'))
 
 function Update-MenuState {
 	try {
+		# Refresh deactivated flag from current StartType
+		Sync-WebClientDeactivatedFlag | Out-Null
+		# When the WebClient service is deactivated, both actions are meaningless
+		if ($script:ServiceDeactivated) { $miConn.Enabled = $false; $miDisc.Enabled = $false; return }
 		$isConnected = Test-DriveAccessible
 		$hasPassword = if ($PortableMode) { -not [string]::IsNullOrWhiteSpace((Get-PlainPassword)) } else { $true }
 		# Connect is meaningful if paused OR not connected, and (in portable mode) a password exists
 		$miConn.Enabled = (($script:Paused -or -not $isConnected) -and $hasPassword)
 		# Disconnect is meaningful if connected and not paused
 		$miDisc.Enabled = ($isConnected -and -not $script:Paused)
-	} catch {
-		$miConn.Enabled = $true
-		$miDisc.Enabled = $false
-	}
+	} catch { $miConn.Enabled = $true; $miDisc.Enabled = $false }
 }
-
+function Invoke-NcTrayDisconnect {
+	# Same behavior as tray menu "Disconnect": pause, unmap, update tray + menu
+	$script:Paused = $true
+	try {
+		Unmap-DriveIfOurs -Force -RemoveProfile
+		$varsPaused = @{ app = $AppName; drive = $State.Drive }
+		$txtPaused  = T 'tray.paused' $varsPaused
+		Set-TrayState -Icon $script:icoRed -Text $txtPaused
+	} catch {}
+	try { Update-MenuState } catch {}
+}
 $menu.add_Opening({ Update-MenuState })
 Update-MenuState
 
@@ -3368,6 +3642,10 @@ $script:tray.ContextMenuStrip = $menu
 # Connect now
 $miConn.add_Click({
 	$script:Paused = $false
+	# Refresh deactivated flag from current StartType
+	Sync-WebClientDeactivatedFlag | Out-Null
+	# Do not try to connect while the WebClient service is disabled
+	if ($script:ServiceDeactivated) { Show-WarnT 'message.service_webclient_disabled_use_tuning'; return }
 	if ($script:NeedsSetup) { if (Show-SettingsDialog -eq [Windows.Forms.DialogResult]::OK) { Refresh-NeedsSetup } else { return } }
 	if ($PortableMode) { if (-not (Ensure-PortablePass -Interactive)) { return } }
 	# ensure subfolder still exists before mapping ---
@@ -3378,11 +3656,7 @@ $miConn.add_Click({
 })
 
 # Disconnect now and pause the tick
-$miDisc.add_Click({
-	$script:Paused = $true
-	try { Unmap-DriveIfOurs -Force -RemoveProfile; $varsPaused = @{ app = $AppName; drive = $State.Drive }; $txtPaused = T 'tray.paused' $varsPaused; Set-TrayState -Icon $script:icoRed -Text $txtPaused } catch {}
-	Update-MenuState
-})
+$miDisc.add_Click({ Invoke-NcTrayDisconnect })
 $miSett.add_Click({ [void](Show-SettingsDialog) })
 $miAbout.add_Click({
 	# Simple About dialog
@@ -3420,7 +3694,6 @@ $miExit.add_Click({
 	try { if ($menu) { $menu.Dispose() } } catch {}
 	[System.Windows.Forms.Application]::Exit()
 })
-$script:tray.ContextMenuStrip = $menu
 
 # Left click balloon
 $script:tray.add_MouseClick({
@@ -3441,6 +3714,10 @@ $script:timer = New-Object System.Windows.Forms.Timer; $script:timer.Interval = 
 $script:timer.add_Tick({
 	# Self-heal for portable mode after missing secret.dat
 	if ($PortableMode -and $script:NeedsSetup) { if ((Test-Path $PortJson) -and (Test-Path $SecretPath)) { Refresh-NeedsSetup; if (-not $script:NeedsSetup) { $script:MissingSecretsPrompted = $false } } }
+	# Keep deactivated flag in sync with real StartType
+	Sync-WebClientDeactivatedFlag | Out-Null
+	# Do not try to (re)map while WebClient service is deactivated
+	if ($script:ServiceDeactivated) { $script:tray.Icon = $script:icoWarn; $script:tray.Text = T 'tray.service_deactivated' @{ app = $AppName }; return }
 	if ($script:Paused) { $script:tray.Icon = $script:icoRed; $varsPaused = @{ app = $AppName; drive = $State.Drive }; $script:tray.Text = T 'tray.paused' $varsPaused; return }
 	if ($script:NeedsSetup) { $script:tray.Icon = $script:icoWarn; $varsNS = @{ app = $AppName }; $script:tray.Text = T 'tray.needs_setup' $varsNS; return }
 	# Portable: if Reset was triggered -> immediately open settings
