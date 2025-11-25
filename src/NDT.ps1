@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2025 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-[CmdletBinding()] param([ValidateSet('', 'Install', 'ExportPortable')] [string]$Action = '', [switch]$Watchdog, [string]$MainMutexName)
+[CmdletBinding()] param([ValidateSet('', 'Install', 'ExportPortable')] [string]$Action = '', [switch]$Watchdog, [string]$MainMutexName, [int]$OwnerPid)
 
 # --- Anchor current script path/name/dir for later use (PS 5.1 safe) ---
 try { if (-not $script:ThisScriptPath -and $PSCommandPath) { $script:ThisScriptPath = $PSCommandPath } } catch {}
@@ -3401,26 +3401,15 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 # ================================================================
 function Run-Watchdog {
 	$created = $false
-	try { $wdMutex = New-Object System.Threading.Mutex($true, $WDMutex, [ref]$created); if (-not $created) { return } } catch { return }
-	function Any-Main-Running {
-		try {
-			$session = (Get-Process -Id $PID).SessionId
-			$procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { ($_.CommandLine -match [regex]::Escape($ScriptFile)) -and ($_.CommandLine -notmatch '\-Watchdog') -and ($_.SessionId -eq $session) }
-			return ($procs -ne $null -and $procs.Count -gt 0)
-		} catch { return $false }
-	}
-	Load-Config
+	$wdKey = if ($OwnerPid -gt 0) { "Local\{0}Watchdog-{1}" -f $AppName, $OwnerPid } else { $WDMutex }
+	try { $wdMutex = New-Object System.Threading.Mutex($true, $wdKey, [ref]$created); if (-not $created) { return } } catch { return }
 	while ($true) {
 		$mainAlive = $false
 		try { if (-not [string]::IsNullOrWhiteSpace($MainMutexName) -and ($m = [System.Threading.Mutex]::OpenExisting($MainMutexName))) { $mainAlive = $true; $m.Dispose() } } catch { $mainAlive = $false }
-		if (-not $mainAlive) { if (-not (Any-Main-Running)) { try { Unmap-DriveIfOurs -Force -RemoveProfile } catch {} }; break }
+		if (-not $mainAlive) { try { Load-Config; Unmap-DriveIfOurs -Force -RemoveProfile } catch {}; break }
 		if ($PortableMode) {
-			try {
-				$root = $null; $root = Split-Path -Qualifier $SecretPath
-				# If drive of secrets vanished (USB pulled)
-				$portableBroken = -not (Test-Path $SecretPath) -or -not (Test-Path $PortJson) -or ($root -and -not (Test-Path $root))
-			} catch { $portableBroken = $true }
-			if ($portableBroken) { try { Unmap-DriveIfOurs -Force -RemoveProfile } catch {}; break }
+			try { $root = $null; $root = Split-Path -Qualifier $SecretPath; $portableBroken = -not (Test-Path $SecretPath) -or -not (Test-Path $PortJson) -or ($root -and -not (Test-Path $root)) } catch { $portableBroken = $true }
+			if ($portableBroken) { try { Load-Config; Unmap-DriveIfOurs -Force -RemoveProfile } catch {}; break }
 		}
 		Start-Sleep -Seconds 2
 	}
@@ -3797,13 +3786,14 @@ $script:timer.add_Tick({
 })
 $script:timer.Start()
 
-# Start watchdog (only if none active)
+# Start watchdog (only if none active for this PID)
+$wdKey = "Local\{0}Watchdog-{1}" -f $AppName, $PID
 try {
-	[void][System.Threading.Mutex]::OpenExisting($WDMutex)
-	# already running
+	[void][System.Threading.Mutex]::OpenExisting($wdKey)
+	# already running for this PID
 } catch {
 	$exe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-	$args = "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Watchdog -MainMutexName `"$script:MainMutexName`""
+	$args = "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -STA -File `"$PSCommandPath`" -Watchdog -MainMutexName `"$script:MainMutexName`" -OwnerPid $PID"
 	Start-Process -FilePath $exe -ArgumentList $args -WindowStyle Hidden | Out-Null
 }
 
