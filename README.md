@@ -29,6 +29,7 @@ Map your Nextcloud server to a real Windows drive letter (e.g. `Z:`) and keep it
   * **Portable**: credentials encrypted with **AES‑256 + PBKDF2** (passphrase you choose)
 * **Watchdog** for clean unmount if the app (or USB stick in portable mode) disappears
 * **WebClient tuning tab**: inspect and adjust the underlying Windows WebDAV redirector (WebClient) limits and timeouts with safe defaults, inline help texts and UAC-guarded “Apply changes” button.
+* **WebDAV cache tab**: monitor the Windows WebDAV redirector cache in real-time, view cached items, clear them manually or auto-wipe on exit via the elevated cache watcher.
 * **Multi‑language (i18n)** with live switching and simple JSON language packs
 
 ---
@@ -89,6 +90,24 @@ Reading the settings does **not** require admin rights; elevation (UAC) requires
 
 ---
 
+## Monitoring the Webdav cache
+
+The **WebDAV cache** tab exposes the actual Windows WebClient cache directory used for all WebDAV drives — including NcDavTray.
+NcDavTray ships a lightweight elevated cache watcher, which gives you visibility into what the redirector has stored and lets you clear it safely without touching WebClient or your mapped drive.
+
+Features include:
+
+* Real-time cache overview (UUID-based entries, type-grouped)
+* Total cache size + file count summary
+* Optional live updates while the watcher is active
+* One-click Clear cache
+* Optional Clear cache on exit — wipes the redirector cache automatically when all instances are closed  
+  *(ideal for privacy, shared devices, or testing redirector behaviour)*
+
+This tool helps diagnose WebDAV performance, compare timeout tuning results, and keep long-lived systems free of stale redirector data.
+
+---
+
 ##  Multi‑language (i18n) support
 
 Live switching with simple JSON language packs:
@@ -118,7 +137,9 @@ Live switching with simple JSON language packs:
   * WebDAV operations required for mapping/unmapping
 
   **No telemetry or analytics. No third-party calls. No background update checks.**
-* **Cleanup**: on disconnect/exit, the app unmounts the drive and removes cosmetic branding so Explorer doesn’t keep stale entries.
+* **Cleanup**
+  * on disconnect/exit, the app unmounts the drive and removes cosmetic branding so Explorer doesn’t keep stale entries.
+  * optional cache auto-clear on watcher exit ensures no leftover WebDAV cache remains on shared or untrusted systems.
 
 ---
 
