@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2025 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-[CmdletBinding()] param([ValidateSet('', 'Install', 'ExportPortable')] [string]$Action = '', [switch]$Watchdog, [string]$MainMutexName, [int]$OwnerPid)
+[CmdletBinding()] param([ValidateSet('', 'Install', 'ExportPortable', 'CacheAgent')] [string]$Action = '', [switch]$Watchdog, [string]$MainMutexName, [int]$OwnerPid, [int]$IntervalSeconds = 3)
 
 # --- Anchor current script path/name/dir for later use (PS 5.1 safe) ---
 try { if (-not $script:ThisScriptPath -and $PSCommandPath) { $script:ThisScriptPath = $PSCommandPath } } catch {}
@@ -168,6 +168,16 @@ if ($null -eq $script:MissingPwdPrompted) { $script:MissingPwdPrompted = $false 
 if ($null -eq $script:WebClientServicePrompted) { $script:WebClientServicePrompted = $false }
 if ($null -eq $script:BasicAuthWarned) { $script:BasicAuthWarned = $false }
 if ($null -eq $script:ServiceDeactivated) { $script:ServiceDeactivated = $false }
+if ($null -eq $script:CacheWatcherLiveUpdate) { $script:CacheWatcherLiveUpdate = $true }
+if ($null -eq $script:CacheWatcherPanel) { $script:CacheWatcherPanel = $null }
+if ($null -eq $script:CacheWatcherDetailsPanel) { $script:CacheWatcherDetailsPanel = $null }
+if ($null -eq $script:CacheWatcherStatusLabel) { $script:CacheWatcherStatusLabel = $null }
+if ($null -eq $script:CacheWatcherLiveCheckbox) { $script:CacheWatcherLiveCheckbox = $null }
+if ($null -eq $script:CacheWatcherPresent) { $script:CacheWatcherPresent = $false }
+if ($null -eq $script:CacheStopPending) { $script:CacheStopPending = $false }
+if ($null -eq $script:CacheStartPending) { $script:CacheStartPending = $false }
+if ($null -eq $script:LastCacheSnapshotSignature) { $script:LastCacheSnapshotSignature = $null }
+if ($null -eq $script:CacheForceRefreshOnce) { $script:CacheForceRefreshOnce = $false }
 # --- Global UI metrics (compute once, DPI-aware) ---
 # Default button height (non-shield buttons)
 if (-not $script:ButtonH) { $script:ButtonH = 28 }
@@ -316,7 +326,323 @@ function Get-ThisScriptPath {
 }
 
 # ================================================================
-# Internationalization (i18n)
+#	Cache agent glue
+# ================================================================
+function Get-CacheAgentStateDir {
+	$base = [Environment]::GetFolderPath('LocalApplicationData')
+	$dir = Join-Path $base ("{0}\CacheAgent" -f $AppName)
+	if (-not (Test-Path -LiteralPath $dir)) { try { New-Item -ItemType Directory -Path $dir -Force | Out-Null } catch {} }
+	return $dir
+}
+function Get-CacheAgentStatePath { $dir = Get-CacheAgentStateDir; return (Join-Path $dir 'state.json') }
+function Get-CacheAgentCommandPath { $dir = Get-CacheAgentStateDir; return (Join-Path $dir 'command.json') }
+function Get-CacheAgentPidPath { $dir = Get-CacheAgentStateDir; return (Join-Path $dir 'pids.json') }
+function Get-CacheAgentState {
+	# Reads current state.json from the cache agent (if present)
+	$path = Get-CacheAgentStatePath
+	if (-not (Test-Path -LiteralPath $path)) { return $null }
+	try {
+		$raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+		if (-not $raw) { return $null }
+		return ($raw | ConvertFrom-Json -ErrorAction Stop)
+	} catch { return $null }
+}
+function Send-CacheAgentCommand([Parameter(Mandatory = $true)][hashtable]$Command) {
+	$path = Get-CacheAgentCommandPath
+	$tmp = $path + '.tmp'
+	try {
+		$json = $Command | ConvertTo-Json -Depth 4
+		$json | Set-Content -LiteralPath $tmp -Encoding UTF8
+		Move-Item -LiteralPath $tmp -Destination $path -Force
+		return $true
+	} catch { return $false }
+}
+function Request-CacheDeleteAll { $cmd = @{ Action = 'DeleteAll' }; return (Send-CacheAgentCommand -Command $cmd) }
+function Start-CacheAgentElevated([int]$IntervalSeconds = 3) {
+	try {
+		$scriptPath = Get-ThisScriptPath
+		if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath)) { return $false }
+		if ($IntervalSeconds -le 0) { $IntervalSeconds = 3 }
+		# Clean up stale command/state files before starting a fresh agent
+		try {
+			$cmdPath = Get-CacheAgentCommandPath
+			if (Test-Path -LiteralPath $cmdPath) { Remove-Item -LiteralPath $cmdPath -Force -ErrorAction SilentlyContinue }
+			# also clear a very old state.json so we start clean
+			$statePath = Get-CacheAgentStatePath
+			if (Test-Path -LiteralPath $statePath) {
+				$fi = Get-Item -LiteralPath $statePath -ErrorAction SilentlyContinue
+				if ($fi) { $ageSeconds = ([DateTime]::UtcNow - $fi.LastWriteTimeUtc).TotalSeconds; if ($ageSeconds -gt 5) { Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue } }
+			}
+		} catch {}
+		$psi = New-Object System.Diagnostics.ProcessStartInfo
+		$psi.FileName = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+#		$psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Action CacheAgent -OwnerPid $PID -IntervalSeconds $IntervalSeconds"
+		$psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Action CacheAgent -IntervalSeconds $IntervalSeconds" # No `-OwnerPid $PID`
+		$psi.Verb = 'runas'
+		$psi.WindowStyle = 'Hidden'
+		$psi.UseShellExecute = $true
+		[System.Diagnostics.Process]::Start($psi) | Out-Null
+		return $true
+	} catch { return $false }
+}
+function Ensure-CacheAgentRunning([int]$IntervalSeconds = 3) {
+	# If at least one watcher is registered in pids.json, we are done.
+	try {
+		$watchersRaw = Get-CacheWatcherEntries
+		$watchers = @()
+		if ($watchersRaw) { $watchers = @($watchersRaw) } # normalize
+		if ($watchers.Count -gt 0) { Write-Verbose ("[CacheGlue] Ensure-CacheAgentRunning: watcher already present (Count={0})" -f $watchers.Count); return $true }
+	} catch { Write-Verbose ("[CacheGlue] Ensure-CacheAgentRunning: error while checking watchers: {0}" -f $_.Exception.Message) }
+	Write-Verbose ("[CacheGlue] Ensure-CacheAgentRunning: no watcher, starting elevated")
+	return (Start-CacheAgentElevated -IntervalSeconds $IntervalSeconds)
+}
+function Invoke-CacheAgentCommand([hashtable]$cmd,[int]$IntervalSeconds = 3) {
+	if (-not $cmd) { return $false }
+	if (-not (Ensure-CacheAgentRunning -IntervalSeconds $IntervalSeconds)) { return $false }
+	return (Send-CacheAgentCommand -Command $cmd)
+}
+function Start-CacheWatcher([int]$IntervalSeconds = 3) {
+	Write-Verbose ("[CacheGlue] Start-CacheWatcher: requested (IntervalSeconds={0})" -f $IntervalSeconds)
+	if ($IntervalSeconds -le 0) { $IntervalSeconds = 3 }
+	if (Ensure-CacheAgentRunning -IntervalSeconds $IntervalSeconds) { Write-Verbose ("[CacheGlue] Start-CacheWatcher: Ensure-CacheAgentRunning returned true"); return $true }
+	Write-Verbose "[CacheGlue] Start-CacheWatcher: Ensure-CacheAgentRunning returned false"
+	return $false
+}
+function Read-CachePidEntries {
+	$path = Get-CacheAgentPidPath
+	if (-not (Test-Path -LiteralPath $path)) { Write-Verbose "[CacheGlue] Read-CachePidEntries: pid file not found"; return @() }
+	try {
+		$raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+		if (-not $raw) { Write-Verbose "[CacheGlue] Read-CachePidEntries: pid file is empty"; return @() }
+		$data = $raw | ConvertFrom-Json -ErrorAction Stop
+		if ($null -eq $data) { Write-Verbose "[CacheGlue] Read-CachePidEntries: json is null"; return @() }
+		if ($data -is [System.Collections.IEnumerable] -and -not ($data -is [string])) { $result = @($data) } else { $result = @($data) }
+		Write-Verbose ("[CacheGlue] Read-CachePidEntries: read {0} entries" -f $result.Count)
+		return $result
+	} catch { Write-Verbose ("[CacheGlue] Read-CachePidEntries: ERROR {0}" -f $_.Exception.Message); return @() }
+}
+function Write-CachePidEntries([object[]]$entries) {
+	$path = Get-CacheAgentPidPath; $tmp = $path + '.tmp'
+	try {
+		Write-Verbose ("[CacheGlue] Write-CachePidEntries: writing {0} entries" -f ($entries.Count))
+		$json = $entries | ConvertTo-Json -Depth 4
+		$json | Set-Content -LiteralPath $tmp -Encoding UTF8
+		Move-Item -LiteralPath $tmp -Destination $path -Force
+	} catch {
+		Write-Verbose ("[CacheGlue] Write-CachePidEntries: ERROR {0}" -f $_.Exception.Message)
+		try { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } catch {}
+	}
+}
+function Get-AliveCachePidEntries {
+	$entries = Read-CachePidEntries
+	if (-not $entries -or $entries.Count -eq 0) { Write-Verbose "[CacheGlue] Get-AliveCachePidEntries: no entries"; return @() }
+	$alive = @()
+	foreach ($e in $entries) {
+		[int]$pidValue = 0
+		try { $pidValue = [int]$e.Pid } catch { $pidValue = 0 }
+		if ($pidValue -le 0) { continue }
+		try { $p = Get-Process -Id $pidValue -ErrorAction Stop; if (-not $p.HasExited) { $alive += $e } } catch { <# process dead, skip #> }
+	}
+	Write-Verbose ("[CacheGlue] Get-AliveCachePidEntries: {0} alive of {1}" -f $alive.Count, $entries.Count)
+	if ($alive.Count -ne $entries.Count) { Write-CachePidEntries $alive }
+	return $alive
+}
+function Register-CacheInstance([int]$ProcessId,[string]$Role,[string]$Tag) {
+	Write-Verbose ("[CacheGlue] Register-CacheInstance: Pid={0}, Role={1}, Tag={2}" -f $ProcessId, $Role, $Tag)
+	$entries = Get-AliveCachePidEntries
+	$filtered = @()
+	foreach ($e in $entries) {
+		[int]$pidValue = 0
+		try { $pidValue = [int]$e.Pid } catch { $pidValue = 0 }
+		if ($pidValue -eq $ProcessId -and [string]$e.Role -eq $Role) { continue }
+		$filtered += $e
+	}
+	$new = [pscustomobject]@{Pid = $ProcessId; Role = $Role; Tag = $Tag}
+	$filtered += $new
+	Write-CachePidEntries $filtered
+}
+function Get-CacheWatcherEntries {
+	# Get current alive entries (may be empty if pid file was deleted)
+	$alive = Get-AliveCachePidEntries
+	# Ensure that THIS process is registered as Ui in the pid set
+	$hasOwnUi = $false
+	if ($alive -and $alive.Count -gt 0) {
+		foreach ($e in $alive) { [int]$pidValue = 0; try { $pidValue = [int]$e.Pid } catch { $pidValue = 0 }; if ($pidValue -eq $PID -and [string]$e.Role -eq 'Ui') { $hasOwnUi = $true; break } }
+	}
+	if (-not $hasOwnUi) {
+		Write-Verbose "[CacheGlue] Get-CacheWatcherEntries: ensuring Ui registration for this process"
+		try { Register-CacheInstance -ProcessId $PID -Role 'Ui' -Tag 'main' } catch {} # This recreates pids.json if the watcher deleted it, and adds our own Ui entry
+		$alive = Get-AliveCachePidEntries
+		if (-not $alive -or $alive.Count -eq 0) { Write-Verbose "[CacheGlue] Get-CacheWatcherEntries: still no alive entries after re-registering Ui"; return @() }
+	}
+	# Collect watcher entries from the refreshed alive set
+	$watchers = @()
+	foreach ($e in $alive) { if ([string]$e.Role -eq 'Watcher') { $watchers += $e } }
+	Write-Verbose ("[CacheGlue] Get-CacheWatcherEntries: returning {0} watcher entries" -f $watchers.Count)
+	return $watchers
+}
+function Test-AnyCacheUi { $alive = Get-AliveCachePidEntries; if (-not $alive) { return $false }; foreach ($e in $alive) { if ([string]$e.Role -eq 'Ui') { return $true } }; return $false }
+function Get-CacheWatcherClearOnExit {
+	$entries = Read-CachePidEntries
+	if (-not $entries -or $entries.Count -eq 0) { return $true }
+	foreach ($e in $entries) {
+		if ([string]$e.Role -eq 'Watcher') {
+			if ($e.PSObject.Properties.Name -contains 'ClearOnExit') { try { return [bool]$e.ClearOnExit } catch { return $true } }
+			return $true # Watcher without flag -> Default = true
+		}
+	}
+	return $true # No watcher entered -> Default = true
+}
+function Set-CacheWatcherClearOnExit([bool]$value) {
+	$entries = Read-CachePidEntries
+	if (-not $entries -or $entries.Count -eq 0) { return }
+	$changed = $false
+	foreach ($e in $entries) {
+		if ([string]$e.Role -eq 'Watcher') {
+			try {
+				if ($e.PSObject.Properties.Name -contains 'ClearOnExit') { $e.ClearOnExit = $value } else { $e | Add-Member -NotePropertyName 'ClearOnExit' -NotePropertyValue $value -Force }
+				$changed = $true
+			} catch {}
+		}
+	}
+	if ($changed) { Write-CachePidEntries $entries }
+}
+
+# ================================================================
+#	Cache agent loop (runs when -Action CacheAgent)
+# ================================================================
+function CacheAgent([int]$OwnerPid,[int]$IntervalSeconds = 3) {
+	$ErrorActionPreference = 'Stop'
+	if ($IntervalSeconds -le 0) { $IntervalSeconds = 3 }
+	$script:CacheAgentStopRequested = $false
+	$script:CacheAgentExplicitStopRequested = $false
+	Register-CacheInstance -ProcessId $PID -Role 'Watcher' -Tag 'cache'
+	try {
+		# Ensure watcher entry has a ClearOnExit flag (default true)
+		$flag = Get-CacheWatcherClearOnExit
+		Set-CacheWatcherClearOnExit -value $flag
+	} catch {}
+	# WebDAV Redirector cache root for WebClient service
+	function Get-CacheSnapshot {
+		# Returns a hashtable with basic summary for the cache
+		$root = Join-Path $env:WINDIR 'ServiceProfiles\LocalService\AppData\Local\Temp\TfsStore\Tfs_DAV'
+		$snapshot = [ordered]@{ Root = $root; Exists = $false; TotalBytes = 0; FileCount = 0; NewestWriteTimeUtc = $null; OldestWriteTimeUtc = $null; Files = @() }
+		if (-not $root -or -not (Test-Path -LiteralPath $root)) { return $snapshot }
+		$snapshot.Exists = $true; $newest = $null; $oldest = $null; [int64]$totalBytes = 0; [int]$count = 0; $files = @()
+		try {
+			Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction Stop | ForEach-Object {
+				$count++
+				$len = [int64]$_.Length
+				$totalBytes += $len
+				$wt = $_.LastWriteTimeUtc
+				if (-not $newest -or $wt -gt $newest) { $newest = $wt }
+				if (-not $oldest -or $wt -lt $oldest) { $oldest = $wt }
+				$type = [System.IO.Path]::GetExtension($_.Name)
+				if ([string]::IsNullOrEmpty($type)) { $type = 'file' } else { $type = $type.TrimStart('.').ToLowerInvariant() }
+				$files += [pscustomobject]@{ Name = $_.Name; FullName = $_.FullName; Length = $len; LastWriteTimeUtc = $wt; Type = $type }
+			}
+		} catch { } # Partial failure is acceptable, we just return what we have
+		$snapshot.TotalBytes = $totalBytes
+		$snapshot.FileCount = $count
+		$snapshot.Files = $files
+		$snapshot.NewestWriteTimeUtc = if ($newest) { $newest.ToString('o') } else { $null }
+		$snapshot.OldestWriteTimeUtc = if ($oldest) { $oldest.ToString('o') } else { $null }
+		return $snapshot
+	}
+	function Write-CacheState([Parameter(Mandatory = $true)][hashtable]$Snapshot, [string]$LastAction = $null, [string]$LastError = $null) {
+		$statePath = Get-CacheAgentStatePath
+		$tmpPath = $statePath + '.tmp'
+		$payload = [ordered]@{ TimestampUtc = (Get-Date).ToUniversalTime().ToString('o'); Snapshot = $Snapshot }
+		if ($LastAction) { $payload.LastAction = $LastAction }
+		if ($LastError) { $payload.LastError = $LastError }
+		try {
+			$json = $payload | ConvertTo-Json -Depth 6
+			$json | Set-Content -LiteralPath $tmpPath -Encoding UTF8
+			Move-Item -LiteralPath $tmpPath -Destination $statePath -Force
+		} catch { } # If we cannot write state, there is not much else we can do
+	}
+	function Get-PendingCommand {
+		# Reads and deletes command.json atomically. Returns a deserialized object or $null.
+		$cmdPath = Get-CacheAgentCommandPath
+		if (-not (Test-Path -LiteralPath $cmdPath)) { return $null }
+		try {
+			$raw = Get-Content -LiteralPath $cmdPath -Raw -ErrorAction Stop
+			if (-not $raw) { Remove-Item -LiteralPath $cmdPath -Force -ErrorAction SilentlyContinue; return $null }
+			$cmd = $raw | ConvertFrom-Json -ErrorAction Stop
+			Remove-Item -LiteralPath $cmdPath -Force -ErrorAction SilentlyContinue
+			return $cmd
+		} catch { try { Remove-Item -LiteralPath $cmdPath -Force -ErrorAction SilentlyContinue } catch {}; return $null }
+	}
+	function Execute-CacheCommand([Parameter(Mandatory = $true)][object]$Command, [string]$Root) {
+		$result = [ordered]@{ Action = $null; Ok = $false; DeletedCount = 0; DeletedBytes = 0; Error = $null }
+		if (-not $Command) { $result.Error = 'Command is null'; return $result }
+		$action = [string]$Command.Action
+		if ([string]::IsNullOrWhiteSpace($action)) { $result.Error = 'Missing Action field'; return $result }
+		$result.Action = $action
+		if (-not $Root -or -not (Test-Path -LiteralPath $Root)) { $result.Error = 'Cache root not found'; return $result }
+		$rootFull = $null
+		try { $rootFull = (Resolve-Path -LiteralPath $Root -ErrorAction Stop).ProviderPath.TrimEnd('\') } catch { $result.Error = 'Could not resolve cache root'; return $result }
+		switch ($action.ToLowerInvariant()) {
+			'deleteall' {
+				try {
+					$files = Get-ChildItem -LiteralPath $Root -Recurse -File -ErrorAction SilentlyContinue
+					foreach ($f in $files) {
+						try {
+							$len = [int64]$f.Length
+							Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
+							$result.DeletedCount++
+							$result.DeletedBytes += $len
+						} catch {}
+					}
+					$result.Ok = $true
+				} catch { $result.Error = $_.Exception.Message }
+			}
+			'stop' { $script:CacheAgentStopRequested = $true; $script:CacheAgentExplicitStopRequested = $true; $result.Ok = $true } # Set global stop flag so outer loop can terminate cleanly
+			default { $result.Error = "Unknown action '$action'" }
+		}
+		return $result
+	}
+	$ownerProcess = $null
+	if ($OwnerPid -gt 0) { try { $ownerProcess = Get-Process -Id $OwnerPid -ErrorAction SilentlyContinue } catch { $ownerProcess = $null } }
+	try {
+		while ($true) {
+			# Clean dead PIDs at every tick
+			Get-AliveCachePidEntries | Out-Null
+			if ($OwnerPid -gt 0) { # If owner process is gone, request a clean stop
+				if ($ownerProcess -eq $null) { $ownerProcess = Get-Process -Id $OwnerPid -ErrorAction SilentlyContinue; if (-not $ownerProcess) { $script:CacheAgentStopRequested = $true } }
+				else { try { $ownerProcess.Refresh(); if ($ownerProcess.HasExited) { $script:CacheAgentStopRequested = $true } } catch { $script:CacheAgentStopRequested = $true } }
+			}
+			$snapshot = Get-CacheSnapshot; $lastAction = $null; $lastError = $null; $cmd = Get-PendingCommand
+			if ($cmd) { $res = Execute-CacheCommand -Command $cmd -Root $snapshot.Root; $lastAction = $res.Action; if (-not $res.Ok -and $res.Error) { $lastError = $res.Error }; if ($res.Ok) { $snapshot = Get-CacheSnapshot } }
+			Write-CacheState -Snapshot $snapshot -LastAction $lastAction -LastError $lastError
+			# Auto-stop if no UI instance is registered anymore
+			if (-not (Test-AnyCacheUi)) { $script:CacheAgentStopRequested = $true }
+			if ($script:CacheAgentStopRequested) {
+				$doClear = $false
+				if (-not $script:CacheAgentExplicitStopRequested) { try { $doClear = Get-CacheWatcherClearOnExit } catch { $doClear = $true } }
+				if ($doClear) {
+					try {
+						$snap = Get-CacheSnapshot
+						if ($snap -and $snap.Root -and (Test-Path -LiteralPath $snap.Root)) {
+							Get-ChildItem -LiteralPath $snap.Root -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+								try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue } catch {}
+							}
+						}
+					} catch {}
+				}
+				# On stop, remove state.json so UIs will no longer see an active watcher
+				try { $statePath = Get-CacheAgentStatePath; if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue } } catch {}
+				# Remove the pid file completely
+				try { $pidPath = Get-CacheAgentPidPath; if (Test-Path -LiteralPath $pidPath) { Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue } } catch {}
+				break
+			}
+			Start-Sleep -Seconds $IntervalSeconds
+		}
+	} catch { try { $snap = Get-CacheSnapshot; Write-CacheState -Snapshot $snap -LastAction 'fatal' -LastError $_.Exception.Message } catch {} }
+}
+
+# ================================================================
+#	Internationalization (i18n)
 # ================================================================
 
 # Embedded English fallback (extend over time). Keep it flat "dot" keys for simplicity.
@@ -326,9 +652,15 @@ $script:I18N_Embedded_En = @'
 	"about.aut": "Author: {author}",
 	"about.des": "Tiny Nextcloud WebDAV tray app",
 	"about.ver": "Version: {version}",
+	"app_password": "App-Password",
 	"box.autostart": "Start with Windows",
+	"box.cache_clear_on_exit": "Clear cache on exit",
+	"box.cache_live_update": "Live update",
 	"box.shortcut_desktop": "Desktop shortcut",
 	"box.shortcut_startmenu": "Start menu shortcut",
+	"button.clear_cache": "Clear cache",
+	"button.cache_watcher_start": "Start cache watcher",
+	"button.cache_watcher_stop": "Stop cache watcher",
 	"button.cancel": "Cancel",
 	"button.clear": "Clear",
 	"button.close": "Close",
@@ -343,6 +675,7 @@ $script:I18N_Embedded_En = @'
 	"button.no": "No",
 	"button.ok": "OK",
 	"button.open": "Open",
+	"button.refresh": "Refresh",
 	"button.restart_service": "Restart service",
 	"button.save": "Save",
 	"button.select": "Select",
@@ -352,6 +685,10 @@ $script:I18N_Embedded_En = @'
 	"button.uninstall": "Uninstall...",
 	"button.up": "Up",
 	"button.yes": "Yes",
+	"column.cache_name": "item UUID",
+	"column.cache_size": "size",
+	"column.cache_modified": "modified",
+	"column.cache_type": "type",
 	"combo.basic_auth_level_0": "0 - Disabled (no Basic at all)",
 	"combo.basic_auth_level_1": "1 - Basic over HTTPS only (recommended)",
 	"combo.basic_auth_level_2": "2 - Basic over HTTP or HTTPS (not recommended)",
@@ -363,8 +700,9 @@ $script:I18N_Embedded_En = @'
 	"label.active_scope": "* The WebClient service has classified the current server as a '{zone}'",
 	"label.active_scope_internet": "internet server",
 	"label.active_scope_local": "local server",
-	"label.app_password": "App-Password",
 	"label.basic_auth_level": "Basic authentication level",
+	"label.cache_info": "Cached items - total used cache size: {size}",
+	"label.cache_watcher_status": "Cache watcher: {status}",
 	"label.checkinterval": "Check interval (sec)",
 	"label.display_name": "Display name (Explorer)",
 	"label.drive_letter": "Drive letter",
@@ -395,7 +733,7 @@ $script:I18N_Embedded_En = @'
 	"message.drive_already_in_use": "Drive {drive} is already in use.",
 	"message.drive_already_in_use_by_other_instance": "Drive {drive} is already in use by another {app} instance.",
 	"message.drive_letter_used": "That drive letter is already in use.",
-	"message.enter_password_first": "Please enter App-Password first.",
+	"message.enter_password_first": "Please enter app-password first.",
 	"message.export_failed": "Export failed: {err}",
 	"message.fill_server_user_drive": "Please fill Server, User and pick a valid drive letter (e.g. Z:).",
 	"message.folder_does_not_exist": "Folder '/{folder}' does not exist.",
@@ -407,7 +745,7 @@ $script:I18N_Embedded_En = @'
 	"message.lang_imported": "Language pack installed: {path}",
 	"message.local_server_timeout_help": "Specifies the connection timeout in seconds for the WebClient service uses when communicating with a local WebDAV server.\r\n\r\nThe default is 15",
 	"message.passphrase_mismatch": "Passphrases did not match.",
-	"message.passphrase_required": "Passphrase is required to encrypt the App-Password.",
+	"message.passphrase_required": "Passphrase is required to encrypt the app-password.",
 	"message.passphrase_wrong_or_corrupt": "Wrong passphrase (or secret is corrupt). Please try again or click Cancel to exit.",
 	"message.portable_launchers_inplace": "Portable launchers written in-place:\r\n{path}",
 	"message.portable_package_exported": "Portable package exported into:\r\n{path}",
@@ -429,11 +767,13 @@ $script:I18N_Embedded_En = @'
 	"prompt.basic_auth_disabled_enable_now": "Basic authentication is disabled for the WebClient service.\r\nThis App uses basic authentication to log into the server and will not work when basic authentication is disabled.\r\nDo you want to enable basic authentication now?",
 	"prompt.basic_auth_0_warning": "This app uses basic authentication to log into the server and will no longer work once basic authentication is disabled.\r\nAre you sure you want to disable basic authentication?",
 	"prompt.basic_auth_2_warning": "Using basic authentication on non-SSL connections can cause serious security issues as the username/password are transmitted in clear text.\r\nAre you sure you want to enable basic authentication for non-SSL connections?",
+	"prompt.cache_delete_all_confirm": "Do you want to delete all cached items?",
+	"prompt.cache_watcher_stop_warn": "Stopping the cache watcher now will disable the '{cache_clear_on_exit}' feature.\r\nAre you sure you want to stop the cache watcher?",
 	"prompt.clear_stored_password": "Clear stored password?",
 	"prompt.export2json": "Export settings into a JSON file?\r\n\r\nIf you select 'Yes', the settings, including the DPAPI-encrypted password, will be saved in a JSON file. This allows the settings to be restored in a later reinstallation of {app} but only on *this* Windows computer for *this* user.",
 	"prompt.export2json_before_uninstall": "Export settings before uninstalling?\r\n\r\nIf you select 'Yes', the settings, including the DPAPI-encrypted password, will be saved in a JSON file. This allows the settings to be restored in a later reinstallation of {app} but only on *this* Windows computer for *this* user. Select 'No' if the settings also need to be transferred to other devices.",
-	"prompt.export2portable": "Export to a portable package?\r\n\r\nIf you select 'Yes' here, a portable package will be exported. Your Nextcloud app password will be encrypted in the '{appshort}_secret.dat' file using the following method:\r\n- AES-256 in CBC mode, PKCS7 padding\r\n- Initialization vector (IV) = 16 random bytes\r\n- Key derived from your passphrase using PBKDF2\r\n  (Rfc2898DeriveBytes) with 100, 000 iterations\r\nYou will be prompted to enter a passphrase during the export process. Remember this passphrase carefully, as your Nextcloud App-password can only be decrypted with it. You can carry the exported folder on a USB stick and run {app} on other people's PCs without leaving secrets behind.",
-	"prompt.export2portable_before_uninstall": "Export to a portable package before uninstall?\r\n\r\nIf you select 'Yes' here, a portable package will be exported. Your Nextcloud app password will be encrypted in the '{appshort}_secret.dat' file using the following method:\r\n- AES-256 in CBC mode, PKCS7 padding\r\n- Initialization vector (IV) = 16 random bytes\r\n- Key derived from your passphrase using PBKDF2\r\n  (Rfc2898DeriveBytes) with 100, 000 iterations\r\nYou will be prompted to enter a passphrase during the export process. Remember this passphrase carefully, as your Nextcloud App-password can only be decrypted with it. You can carry the exported folder on a USB stick and run {app} on other people's PCs without leaving secrets behind.",
+	"prompt.export2portable": "Export to a portable package?\r\n\r\nIf you select 'Yes' here, a portable package will be exported. Your Nextcloud app password will be encrypted in the '{appshort}_secret.dat' file using the following method:\r\n- AES-256 in CBC mode, PKCS7 padding\r\n- Initialization vector (IV) = 16 random bytes\r\n- Key derived from your passphrase using PBKDF2\r\n  (Rfc2898DeriveBytes) with 100, 000 iterations\r\nYou will be prompted to enter a passphrase during the export process. Remember this passphrase carefully, as your Nextcloud app-password can only be decrypted with it. You can carry the exported folder on a USB stick and run {app} on other people's PCs without leaving secrets behind.",
+	"prompt.export2portable_before_uninstall": "Export to a portable package before uninstall?\r\n\r\nIf you select 'Yes' here, a portable package will be exported. Your Nextcloud app password will be encrypted in the '{appshort}_secret.dat' file using the following method:\r\n- AES-256 in CBC mode, PKCS7 padding\r\n- Initialization vector (IV) = 16 random bytes\r\n- Key derived from your passphrase using PBKDF2\r\n  (Rfc2898DeriveBytes) with 100, 000 iterations\r\nYou will be prompted to enter a passphrase during the export process. Remember this passphrase carefully, as your Nextcloud app-password can only be decrypted with it. You can carry the exported folder on a USB stick and run {app} on other people's PCs without leaving secrets behind.",
 	"prompt.folder_is_not_empty_overwrite": "Folder '{dir}' is not empty.\r\nOverwrite its contents?",
 	"prompt.folder_missing_open_settings": "Configured folder '/{folder}' does not exist.\r\nOpen Settings to choose a new folder?",
 	"prompt.folder_no_longer_exists_choose_new": "Configured folder '/{folder}' no longer exists.\r\nChoose a new folder now?",
@@ -448,12 +788,14 @@ $script:I18N_Embedded_En = @'
 	"status.not_found": "<not found>",
 	"status.pending": "working...",
 	"status.running": "running",
+	"status.starting": "starting...",
 	"status.stopped": "stopped",
+	"status.stopping": "stopping...",
 	"tab.basic_settings": "Basic settings",
 	"tab.webclient_tuning": "WebClient tuning",
+	"tab.webdav_cache": "WebDAV cache",
 	"tip.basic_auth": "Using basic authentication on non-SSL connections can cause serious\r\nsecurity issues as the username/password are transmitted in clear text",
-	"tip.enter_password": "App-Password",
-	"tip.enter_password_and_encrypt": "Enter App-Password and click 'Encrypt' to enable folder browse",
+	"tip.enter_password_and_encrypt": "Enter app-password and click 'Encrypt' to enable folder browse",
 	"tip.enter_server": "Server address without https://",
 	"tip.enter_user": "User login name",
 	"tip.internet_server_timeout_help": "Specifies the connection timeout in seconds for the WebClient\nservice uses when communicating with non-local WebDAV servers",
@@ -1515,7 +1857,7 @@ function Export-To-Portable {
 				$pwDlg.Text = (T 'title.app_password_query' @{ app = $AppName })
 				$pwDlg.StartPosition = 'CenterScreen'; $pwDlg.FormBorderStyle = 'FixedDialog'
 				$pwDlg.MaximizeBox = $false; $pwDlg.MinimizeBox = $false; $pwDlg.TopMost = $true; $pwDlg.Width = 360; $pwDlg.Height = 150
-				$lbl = New-Object Windows.Forms.Label; $lbl.Text = (T 'label.app_password'); $lbl.Left = 12; $lbl.Top = 20; $lbl.AutoSize = $true
+				$lbl = New-Object Windows.Forms.Label; $lbl.Text = (T 'app_password'); $lbl.Left = 12; $lbl.Top = 20; $lbl.AutoSize = $true
 				$txt = New-Object Windows.Forms.TextBox; $txt.Left = 120; $txt.Top = 18; $txt.Width = 200; $txt.UseSystemPasswordChar = $true
 				$ok = New-Object Windows.Forms.Button; $ok.Text = (T 'button.ok'); $ok.Left = 170; $ok.Top = 60; $ok.Width = 70; $ok.Height = $script:ButtonXH
 				$ca = New-Object Windows.Forms.Button; $ca.Text = (T 'button.cancel'); $ca.Left = 250; $ca.Top = 60; $ca.Width = 70; $ca.Height = $script:ButtonXH
@@ -1902,16 +2244,18 @@ function Show-SettingsDialog {
 	# --- TabControl host (chrome stays on $f) ---
 	$script:Tabs = New-Object System.Windows.Forms.TabControl
 	$script:Tabs.Left = 8; $script:Tabs.Top = 8; $script:Tabs.Width = $f.ClientSize.Width - 16; $script:Tabs.Height = $f.ClientSize.Height - 16; $script:Tabs.Anchor = 'Top, Left, Right, Bottom'
-	$script:Tabs.Appearance = 'Normal' # 'Normal' | 'Buttons' | 'FlatButtons'
+	$script:Tabs.Appearance = 'Buttons' # 'Normal' | 'Buttons' | 'FlatButtons'
 	$script:Tabs.HotTrack = $true; $script:Tabs.TabStop = $false # keep focus inside the active TabPage
 	# Tab: Basic
 	$tabBasic = $script:TabBasic = New-Object System.Windows.Forms.TabPage; $tabBasic.Text = (T 'tab.basic_settings'); $tabBasic.Padding = '6, 6, 6, 6'
 	# Tab: WebClient Tuning
 	$tabTuning = $script:TabTuning = New-Object System.Windows.Forms.TabPage; $tabTuning.Text = (T 'tab.webclient_tuning'); $tabTuning.Padding = '6, 6, 6, 6'
-	[void]$script:Tabs.TabPages.Add($tabBasic); [void]$script:Tabs.TabPages.Add($tabTuning)
+	# Tab: WebDAV cache cleanup (on-demand admin cleaner)
+	$tabCache = $script:TabCache = New-Object System.Windows.Forms.TabPage; $tabCache.Text = (T 'tab.webdav_cache'); $tabCache.Padding = '6, 6, 6, 6'
+	[void]$script:Tabs.TabPages.Add($tabBasic); [void]$script:Tabs.TabPages.Add($tabTuning); [void]$script:Tabs.TabPages.Add($tabCache)
 	$f.Controls.Add($script:Tabs)
 	# Render content into each tab page (container ! = HostForm)
-	Render-BasicSettingsTab -HostTab $tabBasic; Render-WebClientTuningTab -HostTab $tabTuning
+	Render-BasicSettingsTab -HostTab $tabBasic; Render-WebClientTuningTab -HostTab $tabTuning; Render-WebDavCacheTab -HostTab $tabCache
 	# Track the window and show
 	$script:SettingsForm = $f
 	$dlg = $f.ShowDialog()
@@ -2005,7 +2349,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 	if ([string]::IsNullOrWhiteSpace($script:TextServer.Text) -or [string]::IsNullOrWhiteSpace($script:TextUser.Text)) { Clear-PictureImage $script:PicAvatar }
 	else { $null = Fetch-UserAvatar ($script:TextServer.Text.Trim()) ($script:TextUser.Text.Trim()); if ($script:UserAvatarBmp) { Set-PictureImageSafe $script:PicAvatar $script:UserAvatarBmp } else { Clear-PictureImage $script:PicAvatar } }
 	# Password
-	$script:LabelPassword = New-Object Windows.Forms.Label; $script:LabelPassword.Text = T 'label.app_password'; $script:LabelPassword.Left = 12; $script:LabelPassword.Top = 100; $script:LabelPassword.AutoSize = $true
+	$script:LabelPassword = New-Object Windows.Forms.Label; $script:LabelPassword.Text = T 'app_password'; $script:LabelPassword.Left = 12; $script:LabelPassword.Top = 100; $script:LabelPassword.AutoSize = $true
 	# Small "?" help button next to the password box
 	$script:ButtonPasswordHelp = New-Object Windows.Forms.Button; $script:ButtonPasswordHelp.Text = '?'; $script:ButtonPasswordHelp.Width = 28; $script:ButtonPasswordHelp.Left = $script:PicFavicon.Left - 2; $script:ButtonPasswordHelp.Top = 94; $script:ButtonPasswordHelp.Height = $script:ButtonH; $script:ButtonPasswordHelp.Anchor = 'Top, Right'
 	# Encrypt button (right of password TextBox)
@@ -2092,7 +2436,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		# Password tooltip (hover only when not yet stored/encrypted)
 		$pwEmpty = ([string]::IsNullOrWhiteSpace($script:TextPassword.Text) -or $script:TextPassword.Tag -eq 'info')
 		$needPwd = (-not $hasEncPortable -and -not $hasEncInstalled)
-		if ($needPwd -and $pwEmpty) { $script:Tip.SetToolTip($script:TextPassword, (T 'tip.enter_password')) } else { $script:Tip.SetToolTip($script:TextPassword, $null) }
+		if ($needPwd -and $pwEmpty) { $script:Tip.SetToolTip($script:TextPassword, (T 'app_password')) } else { $script:Tip.SetToolTip($script:TextPassword, $null) }
 	}
 	# Clicking the readonly path box
 	$script:TxtSub.add_MouseDown({
@@ -2372,9 +2716,10 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		# update static labels / buttons in this window
 		& $setTxt $script:TabBasic (T 'tab.basic_settings')
 		& $setTxt $script:TabTuning (T 'tab.webclient_tuning')
+		& $setTxt $script:TabCache (T 'tab.webdav_cache')
 		& $setTxt $script:LabelServer (T 'label.server')
 		& $setTxt $script:LabelUser (T 'label.user')
-		& $setTxt $script:LabelPassword (T 'label.app_password')
+		& $setTxt $script:LabelPassword (T 'app_password')
 		& $setTxt $script:LabelSubfolder (T 'label.subfolder')
 		& $setTxt $script:LabelDriveLetter (T 'label.drive_letter')
 		& $setTxt $script:LabelDisplayName (T 'label.display_name')
@@ -2406,6 +2751,15 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		& $setTxt $script:ButtonServiceRestart (T 'button.restart_service')
 		& $setTxt $script:ButtonApplyAsAdmin (T 'button.uac_apply_changes')
 		& $setTxt $script:ButtonClose2 (T 'button.close')
+		# WebDAV cache tab Labels/Buttons
+		& $setTxt $script:CacheWatcherStartButton (T 'button.cache_watcher_start')
+		& $setTxt $script:CacheWatcherStopButton (T 'button.cache_watcher_stop')
+		& $setTxt $script:CacheWatcherLiveCheckbox (T 'box.cache_live_update')
+		& $setTxt $script:ButtonCacheRefresh (T 'button.refresh')
+		& $setTxt $script:CacheClearOnExitCheckbox (T 'box.cache_clear_on_exit')
+		& $setTxt $script:ButtonCacheDeleteAll (T 'button.clear_cache')
+        # Update cache ListView column headers
+		if ($script:CacheListView -and -not $script:CacheListView.IsDisposed) { $cols = $script:CacheListView.Columns; if ($cols.Count -ge 4) { $cols[0].Text = (T 'column.cache_name'); $cols[1].Text = (T 'column.cache_size'); $cols[2].Text = (T 'column.cache_modified'); $cols[3].Text = (T 'column.cache_type') } }
 		# force-refresh all tooltips to avoid stale cached strings
 		$script:Tip.RemoveAll()
 		# apply i18n to static ToolTips
@@ -2672,6 +3026,8 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		try { if ($script:ServerScopeTimer) { $script:ServerScopeTimer.Stop(); $script:ServerScopeTimer.Dispose() } } catch {}
 		# ensure WebClientRegTimer is fully stopped when settings dialog closes
 		try { if ($script:WebClientRegTimer) { $script:WebClientRegTimer.Stop(); $script:WebClientRegTimer.Dispose() } } catch {}
+		# ensure CacheAgentTimer is fully stopped when settings dialog closes
+		try { if ($script:CacheAgentTimer) { $script:CacheAgentTimer.Stop(); $script:CacheAgentTimer.Dispose() } } catch {}
 		# break default buttons link to the form (defuse lingering refs)
 		try { $sender.AcceptButton = $null; $sender.CancelButton = $null } catch {}
 		# Dispose only the PictureBox-held clones; do NOT dispose global server/avatar bitmaps.
@@ -2680,6 +3036,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		# fully detach tooltip associations before disposing it
 		try { if ($script:Tip) { $script:Tip.RemoveAll() } } catch {}
 		try { if ($script:Tip) { $script:Tip.Dispose(); $script:Tip = $null } } catch {}
+		try { if ($script:CacheListEntryFont) { $script:CacheListEntryFont.Dispose(); $script:CacheListEntryFont = $null } } catch {}
 		# drop script-scope helpers/closures so GC can collect them
 		try {
 			$script:ComputeDefaultLabel = $null
@@ -2696,6 +3053,12 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 			$script:BasicSettings_Auto = $null
 			$script:BrowseState = $null
 			$script:BasicSettingsStatuses = $null
+			$script:UpdateCacheTotalLabel = $null
+			$script:RenderCacheEntries = $null
+			$script:RefreshCacheList = $null
+			$script:UpdateCacheWatcherUi = $null
+			$script:InvokeCacheDeleteAll = $null
+			$script:InvokeCacheRefresh = $null
 		} catch {}
 		# encourage prompt collection of now-unrooted closures
 		try { [System.GC]::Collect(); [System.GC]::WaitForPendingFinalizers() } catch {}
@@ -2708,8 +3071,17 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 			$script:FaviconTimer = $null; $script:AvatarTimer = $null
 			# drop WebClient tuning state so nothing pins the timer / closures
 			$script:WebClientRegTimer = $null
+			$script:CacheAgentTimer = $null
 			$script:UpdateWebClientRegView = $null
 			$script:UpdateWebClientApplyButton = $null
+			$script:Tabs = $null
+			$script:TabBasic = $null
+			$script:TabTuning = $null
+			$script:TabCache = $null
+			$script:CacheListView = $null
+			$script:CacheAgeNumeric = $null
+			$script:ButtonCacheRefresh = $null
+			$script:ButtonCacheDeleteAll = $null
 			$script:Tabs = $null; $script:TabBasic = $null; $script:TabTuning = $null
 		} catch {}
 	})
@@ -3328,6 +3700,332 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 		} catch {}
 	})
 }
+function Format-CacheBytes([long]$b) {
+	if ($b -ge 1GB) { return ('{0:N1} GB' -f ($b / 1GB)) }
+	elseif ($b -ge 1MB) { return ('{0:N1} MB' -f ($b / 1MB)) }
+	elseif ($b -ge 1KB) { return ('{0:N0} KB' -f ($b / 1KB)) }
+	else { return ('{0:N0} B' -f $b) }
+}
+function Render-WebDavCacheTab([Parameter(Mandatory)] [System.Windows.Forms.TabPage]$HostTab) {
+	$t = $HostTab
+	$t.Controls.Clear()
+	# ---- layout: main container ----
+	$panelMain = $script:CacheWatcherDetailsPanel = New-Object Windows.Forms.Panel; $panelMain.Dock = 'Fill'
+	$t.Controls.Add($panelMain)
+	# list panel (center)
+	$panelList = New-Object Windows.Forms.Panel; $panelList.Dock = 'Fill'
+	$panelMain.Controls.Add($panelList)
+	# bottom panel: clear cache button
+	$panelBottom = New-Object Windows.Forms.Panel; $panelBottom.Dock = 'Bottom'; $panelBottom.Height = 40
+	$panelMain.Controls.Add($panelBottom)
+	# info panel (line 3)
+	$panelTop = New-Object Windows.Forms.Panel; $panelTop.Dock = 'Top'; $panelTop.Height = 40
+	$panelMain.Controls.Add($panelTop)
+	# watcher panel (line 2)
+	$panelWatcher = $script:CacheWatcherPanel = New-Object Windows.Forms.Panel; $panelWatcher.Dock = 'Top'; $panelWatcher.Height = 40
+	$panelMain.Controls.Add($panelWatcher)
+	# status panel (line 1)
+	$panelStatus = $script:CacheStatusPanel = New-Object Windows.Forms.Panel; $panelStatus.Dock = 'Top'; $panelStatus.Height = 30
+	$panelMain.Controls.Add($panelStatus)
+	$lblWatcher = $script:CacheWatcherStatusLabel = New-Object Windows.Forms.Label; $lblWatcher.Left = 4; $lblWatcher.Top = 12; $lblWatcher.AutoSize = $true
+	$panelStatus.Controls.Add($lblWatcher)
+	# watcher row: label left, toggle/live/refresh right
+	$flowWatcherLeft = New-Object Windows.Forms.FlowLayoutPanel; $flowWatcherLeft.Dock = 'Left'; $flowWatcherLeft.AutoSize = $true; $flowWatcherLeft.AutoSizeMode = 'GrowAndShrink'; $flowWatcherLeft.WrapContents = $false; $flowWatcherLeft.Padding = '0,2,4,4'
+	$flowWatcherRight = New-Object Windows.Forms.FlowLayoutPanel; $flowWatcherRight.Dock = 'Right'; $flowWatcherRight.AutoSize = $true; $flowWatcherRight.AutoSizeMode = 'GrowAndShrink'; $flowWatcherRight.WrapContents = $false; $flowWatcherRight.Padding = '4,2,0,0'; $flowWatcherRight.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+	# Start button (with UAC shield)
+	$btnStart = $script:CacheWatcherStartButton = New-Object Windows.Forms.Button; $btnStart.Text = (T 'button.cache_watcher_start'); $btnStart.AutoSize = $true; $btnStart.AutoSizeMode = 'GrowAndShrink'; $btnStart.MinimumSize = New-Object System.Drawing.Size(0, $script:ButtonXH); $btnStart.Margin = New-Object System.Windows.Forms.Padding(4,0,0,0)
+	try { $null = $btnStart.Handle; Enable-FlatUacShield $btnStart } catch {} # start needs elevation
+	# Stop button (no UAC shield)
+	$btnStop = $script:CacheWatcherStopButton = New-Object Windows.Forms.Button; $btnStop.Text = (T 'button.cache_watcher_stop'); $btnStop.AutoSize = $true; $btnStop.AutoSizeMode = 'GrowAndShrink'; $btnStop.MinimumSize = New-Object System.Drawing.Size(0, $script:ButtonH); $btnStop.Margin = New-Object System.Windows.Forms.Padding(4,4,0,0)
+	$chkLive = $script:CacheWatcherLiveCheckbox = New-Object Windows.Forms.CheckBox; $chkLive.Text = (T 'box.cache_live_update'); $chkLive.AutoSize = $true; $chkLive.Checked = $script:CacheWatcherLiveUpdate; $chkLive.Margin = New-Object System.Windows.Forms.Padding(0,10,4,0)
+	$btnRefresh = $script:ButtonCacheRefresh = New-Object Windows.Forms.Button; $btnRefresh.Text = (T 'button.refresh'); $btnRefresh.Width = 100; $btnRefresh.Height = $script:ButtonH; $btnRefresh.Margin = New-Object System.Windows.Forms.Padding(4,4,0,0)
+	$flowWatcherLeft.Controls.AddRange(@($btnStart, $btnStop))
+	$flowWatcherRight.Controls.AddRange(@($btnRefresh, $chkLive))
+	$panelWatcher.Controls.AddRange(@($flowWatcherLeft, $flowWatcherRight))
+	# info row (line 3): only text on the left
+	$lblInfo = $script:LabelCacheInfo = New-Object Windows.Forms.Label; $lblInfo.Text = (T 'label.cache_info' @{ size = (Format-CacheBytes 0) }); $lblInfo.Font = New-Object System.Drawing.Font($UiFontFamily, 9, $UiFontStyleRegular); $lblInfo.AutoSize = $true; $lblInfo.Left = 0; $lblInfo.Top = 8
+	$panelTop.Controls.Add($lblInfo)
+	# ListView
+	$lv = $script:CacheListView = New-Object Windows.Forms.ListView; $lv.View = 'Details'; $lv.FullRowSelect = $true; $lv.MultiSelect = $true; $lv.HideSelection = $false; $lv.Dock = 'Fill'; $lv.HeaderStyle = 'Clickable'; $lv.GridLines = $true; $lv.Sorting = 'None'
+	$lv.TabStop = $false; $lv.Enabled = $false; $lv.OwnerDraw = $true
+	# Use smaller monospace font for cache entries
+	$script:CacheListEntryFont = New-Object System.Drawing.Font('Consolas', 7.5)
+	$lv.add_DrawColumnHeader({
+		param($s,$e)
+		$font = $e.Font
+		$flags = [System.Windows.Forms.TextFormatFlags]::Left -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter
+		$e.Graphics.FillRectangle([System.Drawing.Brushes]::Gainsboro, $e.Bounds) # Paint header background (no DrawBackground)
+		[System.Windows.Forms.TextRenderer]::DrawText($e.Graphics, $e.Header.Text, $font, $e.Bounds, [System.Drawing.SystemColors]::WindowText, $flags)
+	})
+	$lv.add_DrawItem({ param($s,$e) }) # required when OwnerDraw is true in Details view
+	$lv.add_DrawSubItem({
+		param($s,$e)
+		$font  = if ($script:CacheListEntryFont) { $script:CacheListEntryFont } else { $e.SubItem.Font }
+		$flags = [System.Windows.Forms.TextFormatFlags]::Left -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter
+		# Always paint our own background (no DrawBackground)
+		if (($e.ItemIndex % 2) -eq 1) { $e.Graphics.FillRectangle([System.Drawing.Brushes]::Honeydew, $e.Bounds) } else { $e.Graphics.FillRectangle([System.Drawing.SystemBrushes]::Window, $e.Bounds) }
+		$textColor = [System.Drawing.SystemColors]::WindowText # Stable text color, independent of Selected/Focus
+		[System.Windows.Forms.TextRenderer]::DrawText($e.Graphics, $e.SubItem.Text, $font, $e.Bounds, $textColor, $flags)
+	})
+	[void]$lv.Columns.Add((T 'column.cache_name'), 330); [void]$lv.Columns.Add((T 'column.cache_size'), 85); [void]$lv.Columns.Add((T 'column.cache_modified'), 131); [void]$lv.Columns.Add((T 'column.cache_type'), 55)
+	# Make columns fill the full client width (avoid horizontal scrolling, full-row background)
+	$script:AlignCacheColumns = {
+		if (-not $script:CacheListView -or $script:CacheListView.IsDisposed) { return }
+		$lvLocal = $script:CacheListView
+		if ($lvLocal.Columns.Count -lt 4) { return }
+		$w0 = 330; $w1 = 85; $w2 = 131 # Base widths for first three columns
+		$total = $lvLocal.ClientSize.Width
+		$last = [Math]::Max(40, $total - ($w0 + $w1 + $w2))
+		$lvLocal.Columns[0].Width = $w0; $lvLocal.Columns[1].Width = $w1; $lvLocal.Columns[2].Width = $w2; $lvLocal.Columns[3].Width = $last
+	}
+	# Initial alignment
+	if ($script:AlignCacheColumns -is [scriptblock]) { & $script:AlignCacheColumns }
+	# Re-align when the ListView is resized
+	$lv.add_Resize({ if ($script:AlignCacheColumns -is [scriptblock]) { & $script:AlignCacheColumns } })
+	$panelList.Controls.Add($lv)
+	# Bottom panel: right actions (clear cache + clear-on-exit)
+	$flowRight = New-Object Windows.Forms.FlowLayoutPanel; $flowRight.Dock = 'Right'; $flowRight.AutoSize = $true; $flowRight.AutoSizeMode = 'GrowAndShrink'; $flowRight.WrapContents = $false; $flowRight.Padding = '4,4,0,4'; $flowRight.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+	$script:CacheClearOnExit = $true; try { $script:CacheClearOnExit = Get-CacheWatcherClearOnExit } catch {}
+	$chkClearOnExit = $script:CacheClearOnExitCheckbox = New-Object Windows.Forms.CheckBox; $chkClearOnExit.Text = (T 'box.cache_clear_on_exit'); $chkClearOnExit.AutoSize = $true; $chkClearOnExit.Checked = $script:CacheClearOnExit; $chkClearOnExit.Margin = New-Object System.Windows.Forms.Padding(0,10,4,0)
+	$btnDeleteAll = $script:ButtonCacheDeleteAll = New-Object Windows.Forms.Button; $btnDeleteAll.Text = (T 'button.clear_cache'); $btnDeleteAll.Width = 140; $btnDeleteAll.Height = $script:ButtonH
+	$flowRight.Controls.AddRange(@($chkClearOnExit, $btnDeleteAll))
+	$panelBottom.Controls.Add($flowRight)
+	# ---- shared state + helpers ----
+	$script:CacheEntries = @()
+	$script:CacheSortColumn = 0
+	$script:CacheSortDescending = $false
+	$script:UpdateCacheTotalLabel = {
+		if (-not $script:LabelCacheInfo -or $script:LabelCacheInfo.IsDisposed) { return }
+		$total = 0L
+		if ($script:CacheEntries) { foreach ($e in $script:CacheEntries) { $total += [int64]$e.Length } }
+		$script:LabelCacheInfo.Text = (T 'label.cache_info' @{ size = (Format-CacheBytes($total)) })
+	}
+	$script:RenderCacheEntries = {
+		if (-not $script:CacheListView -or $script:CacheListView.IsDisposed) { return }
+		$entries = $script:CacheEntries
+		if (-not $entries) {
+			$script:CacheListView.BeginUpdate()
+			$script:CacheListView.Items.Clear()
+			$script:CacheListView.EndUpdate()
+			if ($script:UpdateCacheTotalLabel -is [scriptblock]) { & $script:UpdateCacheTotalLabel }
+			return
+		}
+		$items = $entries
+		switch ($script:CacheSortColumn) {
+			0 { $items = if ($script:CacheSortDescending) { $entries | Sort-Object Name -Descending } else { $entries | Sort-Object Name } }
+			1 { $items = if ($script:CacheSortDescending) { $entries | Sort-Object Length -Descending } else { $entries | Sort-Object Length } }
+			2 { $items = if ($script:CacheSortDescending) { $entries | Sort-Object LastWriteTimeUtc -Descending } else { $entries | Sort-Object LastWriteTimeUtc } }
+			3 { $items = if ($script:CacheSortDescending) { $entries | Sort-Object Type -Descending } else { $entries | Sort-Object Type } }
+		}
+		$script:CacheListView.BeginUpdate()
+		$script:CacheListView.Items.Clear()
+		foreach ($f in $items) {
+			$sizeText = Format-CacheBytes ([long]$f.Length)
+			$dt = [DateTime]::SpecifyKind($f.LastWriteTimeUtc, [DateTimeKind]::Utc).ToLocalTime()
+			$item = New-Object Windows.Forms.ListViewItem $f.Name
+			[void]$item.SubItems.Add($sizeText)
+			[void]$item.SubItems.Add($dt.ToString('yyyy-MM-dd HH:mm'))
+			$typeText = if ($f.Type) { [string]$f.Type } else { 'file' }
+			[void]$item.SubItems.Add($typeText)
+			$item.Tag = $f
+			[void]$script:CacheListView.Items.Add($item)
+		}
+		$script:CacheListView.EndUpdate()
+		if ($script:UpdateCacheTotalLabel -is [scriptblock]) { & $script:UpdateCacheTotalLabel }
+	}
+	$script:RefreshCacheList = {
+		try {
+			if (-not $script:CacheListView -or $script:CacheListView.IsDisposed) { return $false }
+			Write-Verbose "[CacheTab] RefreshCacheList: using Get-CacheAgentState"
+			$state = Get-CacheAgentState
+			# No snapshot: clear once when transitioning from "had snapshot" -> "no snapshot"
+			if (-not $state -or -not $state.Snapshot) {
+				Write-Verbose "[CacheTab] RefreshCacheList: no snapshot"
+				if ($script:LastCacheSnapshotSignature -ne $null) {
+					Write-Verbose "[CacheTab] RefreshCacheList: snapshot disappeared, clearing list once"
+					$script:LastCacheSnapshotSignature = $null; $script:CacheEntries = @()
+					if ($script:RenderCacheEntries -is [scriptblock]) { & $script:RenderCacheEntries }
+				}
+				else { Write-Verbose "[CacheTab] RefreshCacheList: snapshot still missing, list already cleared, skipping redraw" }
+				return $false
+			}
+			# Snapshot present: build a cheap signature to detect changes
+			$snapshot = $state.Snapshot
+			$signature = "{0}|{1}|{2}|{3}" -f $snapshot.FileCount, $snapshot.TotalBytes, $snapshot.NewestWriteTimeUtc, $snapshot.OldestWriteTimeUtc
+			if (-not $script:CacheForceRefreshOnce -and $signature -eq $script:LastCacheSnapshotSignature) { Write-Verbose "[CacheTab] RefreshCacheList: snapshot unchanged, skipping redraw"; return $true }
+			# Either forced or snapshot changed: reset force flag and update signature
+			$script:CacheForceRefreshOnce = $false
+			$script:LastCacheSnapshotSignature = $signature
+			$files = $snapshot.Files
+			if (-not $files) { $script:CacheEntries = @(); if ($script:RenderCacheEntries -is [scriptblock]) { & $script:RenderCacheEntries }; return $true }
+			$script:CacheEntries = @($files)
+			if ($script:RenderCacheEntries -is [scriptblock]) { & $script:RenderCacheEntries }
+			Write-Verbose ("[CacheTab] RefreshCacheList: rendered {0} items" -f $script:CacheListView.Items.Count)
+			return $true
+		} catch {
+			try { $script:CacheListView.EndUpdate() } catch {}
+			Write-Verbose ("[CacheTab] RefreshCacheList error: {0}" -f $_.Exception.Message)
+			return $false
+		}
+	}
+	$script:UpdateCacheWatcherUi = {
+		try {
+			if (-not $script:CacheWatcherStatusLabel -or $script:CacheWatcherStatusLabel.IsDisposed) { return }
+			if (-not $script:CacheWatcherStartButton -or $script:CacheWatcherStartButton.IsDisposed) { return }
+			if (-not $script:CacheWatcherStopButton -or $script:CacheWatcherStopButton.IsDisposed) { return }
+			$anyWatcher = $script:CacheWatcherPresent
+			$starting = $script:CacheStartPending
+			$stopping = $script:CacheStopPending
+			$statusKey = 'label.cache_watcher_stopped'
+			Write-Verbose ("[CacheTab] UpdateCacheWatcherUi: anyWatcher={0}, starting={1}, stopping={2}" -f $anyWatcher, $starting, $stopping)
+			if ($starting -and -not $anyWatcher) {
+				# starting (no watcher visible yet, start requested)
+				$statusKey = 'status.starting'
+				$script:CacheWatcherStartButton.Visible = $true
+				$script:CacheWatcherStartButton.Enabled = $false
+				$script:CacheWatcherStopButton.Visible = $false
+			}
+			elseif ($stopping -and $anyWatcher) {
+				# stopping (stop requested, watcher still present)
+				$statusKey = 'status.stopping'
+				$script:CacheWatcherStartButton.Visible = $false
+				$script:CacheWatcherStopButton.Visible = $true
+				$script:CacheWatcherStopButton.Enabled = $false
+			}
+			elseif ($anyWatcher) {
+				# running (normal state)
+				$statusKey = 'status.running'
+				$script:CacheWatcherStartButton.Visible = $false
+				$script:CacheWatcherStopButton.Visible = $true
+				$script:CacheWatcherStopButton.Enabled = $true
+			}
+			else {
+				# stopped (no watcher, no pending start/stop)
+				$statusKey = 'status.stopped'
+				$script:CacheWatcherStartButton.Visible = $true
+				$script:CacheWatcherStartButton.Enabled = $true
+				$script:CacheWatcherStopButton.Visible = $false
+			}
+			Write-Verbose ("[CacheTab] UpdateCacheWatcherUi: statusKey={0}" -f $statusKey)
+			$script:CacheWatcherStatusLabel.Text = (T label.cache_watcher_status @{ status = (T $statusKey) })
+			# disable details while stopping, otherwise coupled to watcher presence
+			$detailsEnabled = $anyWatcher -and -not $stopping
+			if ($script:LabelCacheInfo -and -not $script:LabelCacheInfo.IsDisposed) { $script:LabelCacheInfo.Enabled = $detailsEnabled }
+			if ($script:CacheListView -and -not $script:CacheListView.IsDisposed) { $script:CacheListView.Enabled = $detailsEnabled }
+			if ($script:ButtonCacheDeleteAll -and -not $script:ButtonCacheDeleteAll.IsDisposed) { $script:ButtonCacheDeleteAll.Enabled = $detailsEnabled }
+			if ($script:ButtonCacheRefresh -and -not $script:ButtonCacheRefresh.IsDisposed) { $script:ButtonCacheRefresh.Enabled = $detailsEnabled }
+			if ($script:CacheWatcherLiveCheckbox -and -not $script:CacheWatcherLiveCheckbox.IsDisposed) { $script:CacheWatcherLiveCheckbox.Enabled = $detailsEnabled }
+			if ($script:CacheClearOnExitCheckbox -and -not $script:CacheClearOnExitCheckbox.IsDisposed) { $script:CacheClearOnExitCheckbox.Enabled = $detailsEnabled }
+		} catch {
+			Write-Verbose ("[CacheTab] UpdateCacheWatcherUi: ERROR {0}" -f $_.Exception.Message)
+		}
+	}
+	$script:InvokeCacheDeleteAll = {
+		if (-not $script:CacheWatcherPresent) { return }
+		$ans = Ask-YesNoWarnT 'prompt.cache_delete_all_confirm'
+		if ($ans -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+		if (Request-CacheDeleteAll) {
+			$script:CacheListView.Items.Clear()
+			$script:CacheEntries = @()
+			if ($script:UpdateCacheTotalLabel -is [scriptblock]) { & $script:UpdateCacheTotalLabel }
+		}
+	}
+	$script:InvokeCacheRefresh = { $script:CacheForceRefreshOnce = $true; if ($script:RefreshCacheList -is [scriptblock]) { [void](& $script:RefreshCacheList) } }
+	if (-not $script:CacheAgentTimer) {
+		$script:CacheAgentTimer = New-Object System.Windows.Forms.Timer
+		$script:CacheAgentTimer.Interval = 1000 # 1500
+		$script:CacheAgentTimer.Add_Tick({
+			try {
+				# Always pull live PIDs (this also cleans orphaned ones)
+				Write-Verbose "[CacheTab] Timer tick: querying watcher entries"
+				$watchersRaw = Get-CacheWatcherEntries
+				$watchers = @()
+				if ($watchersRaw) {
+					# Normalize to an array, even if a single PSCustomObject is returned
+					$watchers = @($watchersRaw)
+				}
+				$count = $watchers.Count
+				$anyWatcher = ($count -gt 0)
+				Write-Verbose ("[CacheTab] Timer tick: watchers.Count={0}, anyWatcher={1}" -f $count, $anyWatcher)
+				$script:CacheWatcherPresent = $anyWatcher
+				if ($anyWatcher -and $script:CacheClearOnExitCheckbox -and -not $script:CacheClearOnExitCheckbox.IsDisposed) {
+					try {
+						$flag = Get-CacheWatcherClearOnExit
+						if ($flag -ne $script:CacheClearOnExit) { $script:CacheClearOnExit = $flag; $script:CacheClearOnExitCheckbox.Checked = $flag }
+					} catch {}
+				}
+				# Transition: starting -> running
+				if ($anyWatcher -and $script:CacheStartPending) {
+					Write-Verbose "[CacheTab] Timer tick: watcher detected, clearing CacheStartPending"
+					$script:CacheStartPending = $false
+				}
+				# Transition: stopping -> stopped
+				if (-not $anyWatcher -and $script:CacheStopPending) {
+					Write-Verbose "[CacheTab] Timer tick: no watcher, clearing CacheStopPending"
+					$script:CacheStopPending = $false
+				}
+				# When no watcher and no start pending: full reset of UI list
+				if (-not $anyWatcher -and -not $script:CacheStartPending) {
+					Write-Verbose "[CacheTab] Timer tick: no watcher and no start pending, clearing list"
+					if ($script:CacheListView -and -not $script:CacheListView.IsDisposed) {
+						$script:CacheListView.BeginUpdate()
+						$script:CacheListView.Items.Clear()
+						$script:CacheListView.EndUpdate()
+					}
+					$script:CacheEntries = @()
+					if ($script:UpdateCacheTotalLabel -is [scriptblock]) { & $script:UpdateCacheTotalLabel }
+				}
+				if ($script:UpdateCacheWatcherUi -is [scriptblock]) { & $script:UpdateCacheWatcherUi }
+				if ($script:CacheWatcherLiveUpdate -and $script:RefreshCacheList -is [scriptblock] -and $script:CacheWatcherPresent) {
+					Write-Verbose "[CacheTab] Timer tick: live update enabled, refreshing cache list"
+					[void](& $script:RefreshCacheList)
+				}
+			} catch {
+				Write-Verbose ("[CacheTab] Timer tick: ERROR {0}" -f $_.Exception.Message)
+			}
+		})
+	}
+	$t.Add_Enter({
+		if ($script:CacheAgentTimer) { $script:CacheAgentTimer.Enabled = $true }
+		if ($script:RefreshCacheList -is [scriptblock]) { [void](& $script:RefreshCacheList) }
+	})
+	# ---- wiring ----
+	$chkClearOnExit.Add_CheckedChanged({
+		$script:CacheClearOnExit = $this.Checked
+		if ($script:CacheWatcherPresent) { try { Set-CacheWatcherClearOnExit -value $script:CacheClearOnExit } catch {} }
+	})
+	$btnRefresh.Add_Click({ & $script:InvokeCacheRefresh })
+	$btnDeleteAll.Add_Click({ & $script:InvokeCacheDeleteAll })
+	$lv.add_ColumnClick({
+		param($s, $e)
+		$col = [int]$e.Column
+		if ($col -eq $script:CacheSortColumn) { $script:CacheSortDescending = -not $script:CacheSortDescending } else { $script:CacheSortColumn = $col; $script:CacheSortDescending = $false }
+		if ($script:RenderCacheEntries -is [scriptblock]) { & $script:RenderCacheEntries }
+	})
+	# wiring for watcher controls: Start (with UAC shield) / Stop (no shield)
+	$script:CacheWatcherStartButton.Add_Click({
+		if ($script:CacheWatcherPresent) { return }
+		if (Start-CacheWatcher) {
+			$script:CacheStopPending = $false
+			$script:CacheStartPending = $true
+			try { Set-CacheWatcherClearOnExit -value $script:CacheClearOnExit } catch {}
+			if ($script:UpdateCacheWatcherUi -is [scriptblock]) { & $script:UpdateCacheWatcherUi }
+		} else { Show-ErrorT 'message.uac_admin_required' }
+	})
+	$script:CacheWatcherStopButton.Add_Click({
+		if (-not $script:CacheWatcherPresent) { return }
+		# Only warn if watcher is configured to clear cache on automatic exit
+		if (Get-CacheWatcherClearOnExit) {
+			$ans = (Ask-YesNoWarnT 'prompt.cache_watcher_stop_warn' @{ cache_clear_on_exit = (T 'box.cache_clear_on_exit') })
+			if ($ans -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+		}
+		try { $null = Send-CacheAgentCommand @{ Action = 'Stop' } } catch {}
+		$script:CacheStopPending = $true
+		if ($script:UpdateCacheWatcherUi -is [scriptblock]) { & $script:UpdateCacheWatcherUi }
+	})
+	$chkLive.Add_CheckedChanged({ $script:CacheWatcherLiveUpdate = $this.Checked }) # Timer always stays on; only the behavior during the tick changes.
+	if ($script:UpdateCacheWatcherUi -is [scriptblock]) { & $script:UpdateCacheWatcherUi }
+}
 
 # ================================================================
 #	Watchdog (separate process guard)
@@ -3436,6 +4134,7 @@ if ($Action -eq 'ExportPortable') {
 	Export-To-Portable -Force
 	return
 }
+if ($Action -eq 'CacheAgent') { CacheAgent -OwnerPid $OwnerPid -IntervalSeconds $IntervalSeconds; return }
 
 # --- Single-instance per config.json ---
 Ensure-SingleInstanceForConfig
