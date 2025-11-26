@@ -33,7 +33,6 @@ if (-not ("Nc.Dpi" -as [type])) {
 		Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-
 namespace Nc {
 	public static class Dpi {
 		[DllImport("user32.dll", SetLastError = false)]
@@ -62,7 +61,6 @@ if (-not ("Nc.NetUse" -as [type])) {
 	Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-
 namespace Nc {
 	public static class NetUse {
 		[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -110,7 +108,6 @@ if (-not ("Nc.Shell" -as [type])) {
 	Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-
 namespace Nc {
 	public static class Shell {
 		[DllImport("shell32.dll")]
@@ -176,12 +173,7 @@ if (-not $script:ButtonMinW) { $script:ButtonMinW = 80 }
 # Top offset for inline copy URL button
 if (-not $script:ButtonCopyOffsetY) { $script:ButtonCopyOffsetY = -2 }
 # Button height big enough for the shield + breathing space
-if (-not $script:UacButtonH) {
-	$script:UacButtonH = 40
-	$script:UacPadY = 0 # vertical padding in panels
-	$script:UacFooterH = $script:UacButtonH + (2 * $script:UacPadY)
-	$script:UacGroupH = $script:UacButtonH + (2 * $script:UacPadY)
-}
+if (-not $script:UacButtonH) { $script:UacButtonH = 40; $script:UacPadY = 0 <# vertical padding in panels #>; $script:UacFooterH = $script:UacButtonH + (2 * $script:UacPadY); $script:UacGroupH = $script:UacButtonH + (2 * $script:UacPadY) }
 # Set once: desired shield size in pixels (e.g., 32 or 36)
 $script:UAC_SHIELD_PX = 30
 function Enable-UacShield([System.Windows.Forms.Button]$btn) {
@@ -195,7 +187,7 @@ function Enable-UacShield([System.Windows.Forms.Button]$btn) {
 public static extern System.IntPtr SendMessage(System.IntPtr hWnd, uint Msg, System.IntPtr wParam, System.IntPtr lParam);
 "@
 		}
-		[Ndt.Native]::SendMessage($btn.Handle,0x160C,[IntPtr]0,[IntPtr]0) | Out-Null  # BCM_SETSHIELD FALSE
+		[Ndt.Native]::SendMessage($btn.Handle,0x160C,[IntPtr]0,[IntPtr]0) | Out-Null # BCM_SETSHIELD FALSE
 		$px = [math]::Max(8,[int]$script:UAC_SHIELD_PX)
 		try { if ($btn.Image) { $btn.Image.Dispose() } } catch {}
 		$ico = [System.Drawing.SystemIcons]::Shield
@@ -235,7 +227,8 @@ public static extern System.IntPtr SendMessage(System.IntPtr hWnd, uint Msg, Sys
 }
 # --- UI font (tray glyph & any small labels) ---
 $UiFontFamily = 'Tahoma'
-$UiFontStyle = [System.Drawing.FontStyle]::Bold # or [System.Drawing.FontStyle]::Regular
+$UiFontStyleRegular = [System.Drawing.FontStyle]::Regular
+$UiFontStyleBold = [System.Drawing.FontStyle]::Bold
 
 # Optional: fall back if the font isn't installed
 if (-not (([System.Drawing.FontFamily]::Families | ForEach-Object Name) -contains $UiFontFamily)) { $UiFontFamily = 'Segoe UI' }
@@ -293,9 +286,7 @@ function Hook-FormDpi([System.Windows.Forms.Form]$f) { if (-not $f) { return }; 
 function Get-LauncherFor([string]$scriptPath) {
 	$vbsFile = [System.IO.Path]::ChangeExtension($scriptPath, 'vbs')
 	$line = 'CreateObject("Wscript.Shell").Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File ""' + $scriptPath + '""", 0, False'
-	if (-not (Test-Path $vbsFile) -or (Get-Content -Raw -Path $vbsFile -ErrorAction SilentlyContinue) -ne $line) {
-		Set-Content -Path $vbsFile -Value $line -Encoding ASCII
-	}
+	if (-not (Test-Path $vbsFile) -or (Get-Content -Raw -Path $vbsFile -ErrorAction SilentlyContinue) -ne $line) { Set-Content -Path $vbsFile -Value $line -Encoding ASCII }
 	return @("$env:SystemRoot\System32\wscript.exe", "`"$vbsFile`"")
 }
 # --- Robust script-path resolver (PS 5.1 safe) ---
@@ -559,36 +550,17 @@ function Show-CustomMsgBoxT([string]$Key, [hashtable]$Vars = $null, [string]$Mod
 	$frm = New-Object System.Windows.Forms.Form
 	Apply-BrandIconToForm $frm
 	$frm.Text = $Caption; $frm.MinimizeBox = $false; $frm.MaximizeBox = $false; $frm.ShowInTaskbar = $false; $frm.TopMost = $true; $frm.AutoSize = $true
-	$frm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
-	$frm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-	$frm.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+	$frm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog; $frm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen; $frm.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
 	# Main panel (2 rows: content + buttons)
-	$mainPanel = New-Object System.Windows.Forms.TableLayoutPanel
-	$mainPanel.ColumnCount = 1; $mainPanel.RowCount = 2
-	$mainPanel.AutoSize = $true; $mainPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
-	$mainPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-	$mainPanel.Padding = New-Object System.Windows.Forms.Padding(12, 12, 12, 12)
-	$mainPanel.GrowStyle = [System.Windows.Forms.TableLayoutPanelGrowStyle]::AddRows
+	$mainPanel = New-Object System.Windows.Forms.TableLayoutPanel; $mainPanel.ColumnCount = 1; $mainPanel.RowCount = 2; $mainPanel.AutoSize = $true; $mainPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink; $mainPanel.Dock = [System.Windows.Forms.DockStyle]::Fill; $mainPanel.Padding = New-Object System.Windows.Forms.Padding(12, 12, 12, 12); $mainPanel.GrowStyle = [System.Windows.Forms.TableLayoutPanelGrowStyle]::AddRows
 	# Upper row: icon + text side by side
-	$contentPanel = New-Object System.Windows.Forms.TableLayoutPanel
-	$contentPanel.ColumnCount = 2; $contentPanel.RowCount = 1
-	$contentPanel.AutoSize = $true; $contentPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
-	$contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-	$contentPanel.GrowStyle = [System.Windows.Forms.TableLayoutPanelGrowStyle]::AddColumns
-	$pic = New-Object System.Windows.Forms.PictureBox
-	$pic.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::CenterImage
-	$pic.Margin = New-Object System.Windows.Forms.Padding(0, 0, 12, 0)
-	$pic.MinimumSize = New-Object System.Drawing.Size(32, 32)
-	if ($icoObj) { $pic.Image = $icoObj.ToBitmap() }
-	else { $pic.Width = 1; $pic.Height = 1; $pic.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 0) } # no icon -> collapse spacing
+	$contentPanel = New-Object System.Windows.Forms.TableLayoutPanel; $contentPanel.ColumnCount = 2; $contentPanel.RowCount = 1; $contentPanel.AutoSize = $true; $contentPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink; $contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill; $contentPanel.GrowStyle = [System.Windows.Forms.TableLayoutPanelGrowStyle]::AddColumns
+	$pic = New-Object System.Windows.Forms.PictureBox; $pic.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::CenterImage; $pic.Margin = New-Object System.Windows.Forms.Padding(0, 0, 12, 0); $pic.MinimumSize = New-Object System.Drawing.Size(32, 32)
+	if ($icoObj) { $pic.Image = $icoObj.ToBitmap() } else { $pic.Width = 1; $pic.Height = 1; $pic.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 0) } # no icon -> collapse spacing
 	$lbl = New-Object System.Windows.Forms.Label; $lbl.Text = $bodyText; $lbl.AutoSize = $true; $lbl.MaximumSize = New-Object System.Drawing.Size(360, 0) # wrap text at ~360px
 	[void]$contentPanel.Controls.Add($pic, 0, 0); [void]$contentPanel.Controls.Add($lbl, 1, 0)
 	# Lower row: buttons, right aligned
-	$buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-	$buttonPanel.AutoSize = $true; $buttonPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
-	$buttonPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-	$buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
-	$buttonPanel.Padding = New-Object System.Windows.Forms.Padding(0, 12, 0, 0)
+	$buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel; $buttonPanel.AutoSize = $true; $buttonPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink; $buttonPanel.Dock = [System.Windows.Forms.DockStyle]::Fill; $buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft; $buttonPanel.Padding = New-Object System.Windows.Forms.Padding(0, 12, 0, 0)
 	$defaultBtn = $null; $cancelBtn = $null
 	$btnMinW = if ($script:ButtonMinW -is [int] -and $script:ButtonMinW -gt 0) { $script:ButtonMinW } else { 80 }
 	foreach ($bdef in $btnDefs) {
@@ -635,11 +607,7 @@ function global:Show-HelpT([string]$TitleKey, [hashtable]$TitleVars = $null, [st
 	# DPI scale (96dpi = 1.0)
 	$scale = ($f.DeviceDpi / 96.0); $icoPx = [int][Math]::Ceiling(32 * $scale) # target box size for the icon
 	# Layout root
-	$root = New-Object System.Windows.Forms.TableLayoutPanel
-	$root.Dock = 'Fill'
-	$root.Padding = New-Object System.Windows.Forms.Padding(12, 12, 12, 12)
-	$root.ColumnCount = 1
-	$root.RowCount = $(if ($Url) { 4 } else { 3 })
+	$root = New-Object System.Windows.Forms.TableLayoutPanel; $root.Dock = 'Fill'; $root.Padding = New-Object System.Windows.Forms.Padding(12, 12, 12, 12); $root.ColumnCount = 1; $root.RowCount = $(if ($Url) { 4 } else { 3 })
 	$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize))) | Out-Null
 	$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize))) | Out-Null
 	if ($Url) { $root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize))) | Out-Null }
@@ -655,60 +623,24 @@ function global:Show-HelpT([string]$TitleKey, [hashtable]$TitleVars = $null, [st
 	$pic.Width = $icoPx; $pic.Height = $icoPx
 	$pic.Margin = New-Object System.Windows.Forms.Padding(0, 2, 8, 0) # a bit of breathing room
 	$pic.Image = [System.Drawing.SystemIcons]::Information.ToBitmap()
-	$lblTitle = New-Object System.Windows.Forms.Label
-	$lblTitle.AutoSize = $true
-	$lblTitle.Font = New-Object System.Drawing.Font($f.Font.FontFamily, ($f.Font.Size + 2), $UiFontStyle)
-	$lblTitle.Text = $title
-	$lblTitle.Margin = New-Object System.Windows.Forms.Padding(8, 6, 0, 0)
+	$lblTitle = New-Object System.Windows.Forms.Label; $lblTitle.AutoSize = $true; $lblTitle.Font = New-Object System.Drawing.Font($f.Font.FontFamily, ($f.Font.Size + 2), $UiFontStyleBold); $lblTitle.Text = $title; $lblTitle.Margin = New-Object System.Windows.Forms.Padding(8, 6, 0, 0)
 	$hdr.Controls.AddRange(@($pic, $lblTitle))
 	# Body
-	$lblBody = New-Object System.Windows.Forms.Label
-	$lblBody.AutoSize = $true
-	$lblBody.MaximumSize = New-Object System.Drawing.Size($wrapW, 0)
-	$lblBody.Text = $body
-	$lblBody.Margin = New-Object System.Windows.Forms.Padding(0, 8, 0, 0)
-	$lblBody.UseMnemonic = $false
+	$lblBody = New-Object System.Windows.Forms.Label; $lblBody.AutoSize = $true; $lblBody.MaximumSize = New-Object System.Drawing.Size($wrapW, 0); $lblBody.Text = $body; $lblBody.Margin = New-Object System.Windows.Forms.Padding(0, 8, 0, 0); $lblBody.UseMnemonic = $false
 	# Optional URL + Copy
 	$urlPanel = $null
 	if ($Url) {
-		$urlPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-		$urlPanel.AutoSize = $true
-		$urlPanel.FlowDirection = 'LeftToRight'
-		$urlPanel.WrapContents = $false
-		$urlPanel.Margin = New-Object System.Windows.Forms.Padding(0, 8, 0, 0)
-		$lnk = New-Object System.Windows.Forms.LinkLabel
-		$lnk.Text = $Url
-		$lnk.AutoSize = $true
-		$lnk.add_LinkClicked({
-			param($s, $e)
-			try {
-				$psi = New-Object System.Diagnostics.ProcessStartInfo
-				$psi.FileName = $Url
-				$psi.UseShellExecute = $true
-				[System.Diagnostics.Process]::Start($psi) | Out-Null
-			} catch {}
-		})
-		$btnCopy = New-Object System.Windows.Forms.Button
-		$btnCopy.Text = T 'button.copy_url'
-		$btnCopy.AutoSize = $true
-		$btnCopy.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowOnly
-		$btnCopy.Height = $script:ButtonH
-		$btnCopy.Margin = New-Object System.Windows.Forms.Padding(8, $script:ButtonCopyOffsetY, 0, 0)
+		$urlPanel = New-Object System.Windows.Forms.FlowLayoutPanel; $urlPanel.AutoSize = $true; $urlPanel.FlowDirection = 'LeftToRight'; $urlPanel.WrapContents = $false; $urlPanel.Margin = New-Object System.Windows.Forms.Padding(0, 8, 0, 0)
+		$lnk = New-Object System.Windows.Forms.LinkLabel; $lnk.Text = $Url; $lnk.AutoSize = $true
+		$lnk.add_LinkClicked({ param($s, $e); try { $psi = New-Object System.Diagnostics.ProcessStartInfo; $psi.FileName = $Url; $psi.UseShellExecute = $true; [System.Diagnostics.Process]::Start($psi) | Out-Null } catch {} })
+		$btnCopy = New-Object System.Windows.Forms.Button; $btnCopy.Text = T 'button.copy_url'
+		$btnCopy.AutoSize = $true; $btnCopy.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowOnly; $btnCopy.Height = $script:ButtonH; $btnCopy.Margin = New-Object System.Windows.Forms.Padding(8, $script:ButtonCopyOffsetY, 0, 0)
 		$btnCopy.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($Url) } catch {} })
 		$urlPanel.Controls.AddRange(@($lnk, $btnCopy))
 	}
 	# Buttons (OK right aligned)
-	$btnRow = New-Object System.Windows.Forms.FlowLayoutPanel
-	$btnRow.Dock = 'Bottom' # 'Fill'
-	$btnRow.FlowDirection = 'RightToLeft'
-	$btnRow.AutoSize = $false
-	$btnRow.Height = $script:ButtonXH + (2 * $script:ButtonPadY)
-	$btnRow.Padding = New-Object System.Windows.Forms.Padding(0, $script:ButtonPadY, 0, 0)
-	$ok = New-Object System.Windows.Forms.Button
-	$ok.Text = $okTxt
-	$ok.Width = 90
-	$ok.Height = $script:ButtonXH
-	$ok.Add_Click({ $f.Close() })
+	$btnRow = New-Object System.Windows.Forms.FlowLayoutPanel; $btnRow.Dock = 'Bottom' <# 'Fill' #>; $btnRow.FlowDirection = 'RightToLeft'; $btnRow.AutoSize = $false; $btnRow.Height = $script:ButtonXH + (2 * $script:ButtonPadY); $btnRow.Padding = New-Object System.Windows.Forms.Padding(0, $script:ButtonPadY, 0, 0)
+	$ok = New-Object System.Windows.Forms.Button; $ok.Text = $okTxt; $ok.Width = $script:ButtonMinW; $ok.Height = $script:ButtonXH; $ok.Add_Click({ $f.Close() })
 	$btnRow.Controls.Add($ok)
 	$f.AcceptButton = $ok
 	$f.CancelButton = $ok
@@ -986,6 +918,10 @@ function Ensure-ConfiguredFolderOrExit {
 	[System.Windows.Forms.Application]::Exit()
 	return $false
 }
+
+# ================================================================
+#	Simple lazy folder picker for Nextcloud (depth = 1 per level)
+# ================================================================
 # depth = 1 listing of children folder names at given parent path
 function Get-NcFolderChildren([string]$parentPath) {
 	if ([string]::IsNullOrWhiteSpace($State.Server) -or [string]::IsNullOrWhiteSpace($State.User)) { return @() }
@@ -999,11 +935,9 @@ function Get-NcFolderChildren([string]$parentPath) {
 	if ($res.PSObject.Properties.Name -contains 'ocs' -and ($res.ocs.data -is [System.Array])) { return ($res.ocs.data | Where-Object { $_.PSObject.Properties.Name -contains 'basename' } | ForEach-Object { [string]$_.basename }) | Sort-Object }
 	return @()
 }
-# Simple lazy folder picker for Nextcloud (depth = 1 per level)
 # Join two subpath fragments using forward slashes and normalize the result
 function Join-SubPath([string]$base, [string]$child) { $base = Normalize-SubPath $base; $child = Normalize-SubPath $child; if ([string]::IsNullOrWhiteSpace($base)) { return $child }; if ([string]::IsNullOrWhiteSpace($child)) { return $base }; return ($base + '/' + $child) }
-# Modal Nextcloud folder picker.
-# Returns: normalized subpath like "A/B/C", or '' for root, or $null on Cancel.
+# Modal Nextcloud folder picker. Returns: normalized subpath like "A/B/C", or '' for root, or $null on Cancel.
 function Show-NcFolderPicker {
 	# Pre-flight: need server/user/password to query OCS
 	if ([string]::IsNullOrWhiteSpace($State.Server) -or [string]::IsNullOrWhiteSpace($State.User)) { return $null }
@@ -1070,7 +1004,7 @@ function New-StatusIcon([string]$label, [System.Drawing.Color]$color) {
 	# up to 2 chars (e.g. "Z:")
 	$txt = if ([string]::IsNullOrWhiteSpace($label)) { '!' } else { $label.Trim().ToUpper() }
 	if ($txt.Length -gt 2) { $txt = $txt.Substring(0, 2) }
-	$font = New-Object System.Drawing.Font($UiFontFamily, 8, $UiFontStyle)
+	$font = New-Object System.Drawing.Font($UiFontFamily, 8, $UiFontStyleBold)
 	$sf = New-Object System.Drawing.StringFormat; $sf.Alignment = 'Center'; $sf.LineAlignment = 'Center'; $sf.FormatFlags = $sf.FormatFlags -bor [System.Drawing.StringFormatFlags]::NoWrap; $sf.Trimming = [System.Drawing.StringTrimming]::None
 	[single]$offsetY = 6; [single]$offsetX = if ($txt.Length -eq 2) { 4 } else { 3 }; [single]$height = [Math]::Max(1, 16 - $offsetY)
 	$rect = New-Object System.Drawing.RectangleF([single]$offsetX, [single]$offsetY, 16, [single]$height)
@@ -1514,7 +1448,7 @@ function Show-CustomBalloon([string]$Title, [string]$Text, [int]$TimeoutMs = 220
 	$script:BalloonForm = $null
 	# --- layout (larger) ---
 	$pad = 12; $iconSz = 96; $gap = 8
-	$fontTitle = New-Object System.Drawing.Font($UiFontFamily, 12, $UiFontStyle); $fontText = New-Object System.Drawing.Font($UiFontFamily, 8, $UiFontStyle) #[System.Drawing.FontStyle]::Regular)
+	$fontTitle = New-Object System.Drawing.Font($UiFontFamily, 12, $UiFontStyleBold); $fontText = New-Object System.Drawing.Font($UiFontFamily, 8, $UiFontStyleBold) #[System.Drawing.FontStyle]::Regular)
 	$fmt = [System.Windows.Forms.TextFormatFlags]::WordBreak -bor [System.Windows.Forms.TextFormatFlags]::NoPadding
 	$maxTextWidth = 520
 	# Measure using TextRenderer (more faithful to WinForms than Graphics.MeasureString)
@@ -1998,8 +1932,8 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 	if (-not ($State.PSObject.Properties.Name -contains 'LangPref')) { Add-Member -InputObject $State -MemberType NoteProperty -Name 'LangPref' -Value '' -Force }
 	# Mode badge
 	$script:LabelMode = New-Object System.Windows.Forms.Label
-	if ($PortableMode) { $script:LabelMode.Text = (T 'mode.portable'); $script:LabelMode.ForeColor = [System.Drawing.Color]::ForestGreen; $script:LabelMode.Font = New-Object System.Drawing.Font($UiFontFamily, 10, $UiFontStyle) }
-	else { $script:LabelMode.Text = (T 'mode.installed'); $script:LabelMode.ForeColor = [System.Drawing.Color]::SteelBlue; $script:LabelMode.Font = New-Object System.Drawing.Font($UiFontFamily, 9, $UiFontStyle) }
+	if ($PortableMode) { $script:LabelMode.Text = (T 'mode.portable'); $script:LabelMode.ForeColor = [System.Drawing.Color]::ForestGreen; $script:LabelMode.Font = New-Object System.Drawing.Font($UiFontFamily, 10, $UiFontStyleBold) }
+	else { $script:LabelMode.Text = (T 'mode.installed'); $script:LabelMode.ForeColor = [System.Drawing.Color]::SteelBlue; $script:LabelMode.Font = New-Object System.Drawing.Font($UiFontFamily, 9, $UiFontStyleBold) }
 	$script:LabelMode.AutoSize = $true; $script:LabelMode.Left = 12; $script:LabelMode.Top = 10
 	$script:LabelServer = New-Object Windows.Forms.Label; $script:LabelServer.Text = (T 'label.server'); $script:LabelServer.Left = 12; $script:LabelServer.Top = 40; $script:LabelServer.AutoSize = $true
 	$script:TextServer = New-Object Windows.Forms.TextBox; $script:TextServer.Top = 38; $script:TextServer.Width = 400; $script:TextServer.Left = $panelMain.ClientSize.Width - $script:TextServer.Width - 2; $script:TextServer.Text = $State.Server; $script:TextServer.Anchor = 'Top, Right'
@@ -2314,7 +2248,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		try { Ensure-Shortcut 'Desktop' $this.Checked } catch { try { $this.Checked = -not $this.Checked } catch {}; try { Show-ErrorT 'message.operation_failed' @{ err = $_.Exception.Message } } catch {} }
 	}).GetNewClosure())
 	# top row: Install/Uninstall + ExportConfig (in two TableLayoutPanel)
-	$PanelButtons1 = New-Object System.Windows.Forms.TableLayoutPanel;  $PanelButtons1.Left = 12; $PanelButtons1.Top = 290; $PanelButtons1.Width = $panelMain.ClientSize.Width - 14; $PanelButtons1.Height = $script:ButtonXH + 2; $PanelButtons1.Anchor = 'Top, Left, Right'
+	$PanelButtons1 = New-Object System.Windows.Forms.TableLayoutPanel; $PanelButtons1.Left = 12; $PanelButtons1.Top = 290; $PanelButtons1.Width = $panelMain.ClientSize.Width - 14; $PanelButtons1.Height = $script:ButtonXH + 2; $PanelButtons1.Anchor = 'Top, Left, Right'
 	$PanelButtons1.RowCount = 1; $PanelButtons1.ColumnCount = 3; $PanelButtons1.GrowStyle = 'FixedSize'; $PanelButtons1.AutoSize = $false
 	$PanelButtons1.ColumnStyles.Clear(); $PanelButtons1.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 50))); $PanelButtons1.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 10))); $PanelButtons1.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 50)))
 	# bottom row: ImportConfig + ExportToPortable
@@ -2330,8 +2264,8 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 	[void]$PanelButtons2.Controls.Add($script:ButtonImportConfig, 0, 0); [void]$PanelButtons2.Controls.Add($script:ButtonExportToPortable, 2, 0)
 	# Enable/disable export buttons based on saved state (installed mode only)
 	$script:RefreshExportButtons = {
-		if ($PortableMode) { return }  # not relevant in portable mode
-		$ready = ($State -and -not [string]::IsNullOrWhiteSpace($State.EncPass) -and -not [string]::IsNullOrWhiteSpace($State.Server)  -and -not [string]::IsNullOrWhiteSpace($State.User))
+		if ($PortableMode) { return } # not relevant in portable mode
+		$ready = ($State -and -not [string]::IsNullOrWhiteSpace($State.EncPass) -and -not [string]::IsNullOrWhiteSpace($State.Server) -and -not [string]::IsNullOrWhiteSpace($State.User))
 		try { if ($script:ButtonExportConfig) { $script:ButtonExportConfig.Enabled = $ready } } catch {}; try { if ($script:ButtonExportToPortable) { $script:ButtonExportToPortable.Enabled = $ready } } catch {}
 	}
 	# Rebind all Basic Settings controls from current $State after an Import/Reload
@@ -2420,7 +2354,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 	}).GetNewClosure())
 	# Also react when selection actually changes (keyboard, programmatic dropdown close, etc.)
 	$script:ComboBoxDrive.add_SelectedIndexChanged({
-		if ($script:DriveSelBusy) { return }  # ignore while we revert programmatically
+		if ($script:DriveSelBusy) { return } # ignore while we revert programmatically
 		if ($script:UpdateSaveButton -is [scriptblock]) { & $script:UpdateSaveButton }
 	})
 	# live language update helper (safe, no crash if some globals are not created yet)
@@ -2580,7 +2514,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		switch ($res) {
 			([System.Windows.Forms.DialogResult]::Yes) {
 				# Cancel this close, then trigger Save AFTER the handler returns
-				$e.Cancel = $true; $script:SuppressUnsavedCheck = $true  # prevent re-prompt
+				$e.Cancel = $true; $script:SuppressUnsavedCheck = $true # prevent re-prompt
 				$f.BeginInvoke([System.Action]{ try { $script:ButtonSave.PerformClick() } catch {} }) | Out-Null
 			}
 			([System.Windows.Forms.DialogResult]::No) { $e.Cancel = $false } # Discard changes and close
@@ -2710,7 +2644,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 				try { if ($script:timer) { $script:timer.Start() } } catch {} } else { try { Ensure-BrandingTick } catch {} } # Nothing critical changed -> only ensure branding (idempotent)
 			Refresh-NeedsSetup
 			Update-TrayImmediate -TryMap
-			$script:Baseline = & $script:GetPendingConfig   # refresh "last saved" snapshot
+			$script:Baseline = & $script:GetPendingConfig # refresh "last saved" snapshot
 			$savedOk = $true
 			$f.DialogResult = [Windows.Forms.DialogResult]::OK
 			$f.Close()
@@ -2882,8 +2816,7 @@ function Get-ServerScope([string]$Server) {
 	switch ($zone.SecurityZone) { 'MyComputer' { return 'Local' }; 'Intranet' { return 'Local' }; default { return 'Internet' } }
 }
 # Elevate and start/restart the WebClient service
-function Invoke-WebClientServiceAction {
-	param([ValidateSet('start', 'restart')][string]$Action, [switch]$NoWait)
+function Invoke-WebClientServiceAction([ValidateSet('start', 'restart')][string]$Action, [switch]$NoWait) {
 	$cmd = if ($Action -eq 'restart') {
 		"try { Stop-Service WebClient -ErrorAction SilentlyContinue; Start-Service WebClient -ErrorAction Stop; exit 0 } catch { exit 1 }"
 	} else {
@@ -3273,7 +3206,7 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 				switch -Regex ($startRaw) { '^Automatic' { $startReg = 'Automatic'; break }; '^Disabled' { $startReg = 'Disabled'; break }; default { $startReg = 'Manual'; break } }
 			} catch { $startReg = $null }
 			# Registry side (canonical 32-bit range)
-			$balReg = [int]   (& $raw 'BasicAuthLevel' $v_BasicAuthLevel $curNow)
+			$balReg = [int] (& $raw 'BasicAuthLevel' $v_BasicAuthLevel $curNow)
 			$attrReg = [int64] (& $raw 'FileAttributesLimitInBytes' $v_FileAttributesLimitInBytes $curNow)
 			if ($attrReg -gt $maxDword) { $attrReg = [int64]$maxDword }
 			$sizeReg = [int64] (& $raw 'FileSizeLimitInBytes' $v_FileSizeLimitInBytes $curNow)
@@ -3281,7 +3214,7 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 			$locReg = [int] (& $raw 'LocalServerTimeoutInSec' $v_LocalTimeoutInSec $curNow)
 			$intReg = [int] (& $raw 'InternetServerTimeoutInSec' $v_InternetTimeoutInSec $curNow)
 			$srReg = [int] (& $raw 'SendReceiveTimeoutInSec' $v_SendReceiveTimeoutInSec $curNow)
-			$nfReg = [int] (& $raw 'ServerNotFoundCacheLifeTimeInSec' $v_NotFoundCacheLifetimeInSec  $curNow)
+			$nfReg = [int] (& $raw 'ServerNotFoundCacheLifeTimeInSec' $v_NotFoundCacheLifetimeInSec $curNow)
 			# UI side (same canonical space)
 			$balUi = 1
 			if ($cmbBAL.SelectedIndex -ge 0) { $balUi = @(0,1,2)[$cmbBAL.SelectedIndex] }
@@ -3587,7 +3520,7 @@ $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $miMode = New-Object System.Windows.Forms.ToolStripLabel
 $miMode.Text = if ($PortableMode) { (T 'mode.portable') } else { (T 'mode.installed') }
 $miMode.ForeColor = if ($PortableMode) { [System.Drawing.Color]::ForestGreen } else { [System.Drawing.Color]::SteelBlue }
-$miMode.Font = New-Object System.Drawing.Font($UiFontFamily, 9, $UiFontStyle)
+$miMode.Font = New-Object System.Drawing.Font($UiFontFamily, 9, $UiFontStyleBold)
 $null = $menu.Items.Add($miMode)
 $menu.Items.Add('-') | Out-Null
 $miConn = $menu.Items.Add((T 'menu.connect'))
@@ -3618,7 +3551,7 @@ function Invoke-NcTrayDisconnect {
 	try {
 		Unmap-DriveIfOurs -Force -RemoveProfile
 		$varsPaused = @{ app = $AppName; drive = $State.Drive }
-		$txtPaused  = T 'tray.paused' $varsPaused
+		$txtPaused = T 'tray.paused' $varsPaused
 		Set-TrayState -Icon $script:icoRed -Text $txtPaused
 	} catch {}
 	try { Update-MenuState } catch {}
@@ -3654,7 +3587,7 @@ $miAbout.add_Click({
 	Hook-FormDpi $f
 	$f.Text = (T 'title.about' @{ app = $AppName }); $f.StartPosition = 'CenterScreen'; $f.FormBorderStyle = 'FixedDialog'; $f.MaximizeBox = $false; $f.MinimizeBox = $false; $f.TopMost = $true; $f.Width = 420; $f.Height = 220; $f.AutoScaleMode = 'Dpi'; $f.Font = New-Object System.Drawing.Font($UiFontFamily, 9)
 	$lblTit = New-Object System.Windows.Forms.Label; $lblTit.Text = "ernolfs $AppName"; $lblTit.AutoSize = $true
-	$lblTit.Font = New-Object System.Drawing.Font($UiFontFamily, 11, $UiFontStyle); $lblTit.Left = 16; $lblTit.Top = 16; $lblTit.UseCompatibleTextRendering = $false
+	$lblTit.Font = New-Object System.Drawing.Font($UiFontFamily, 11, $UiFontStyleBold); $lblTit.Left = 16; $lblTit.Top = 16; $lblTit.UseCompatibleTextRendering = $false
 	$lblDes = New-Object System.Windows.Forms.Label; $lblDes.Left = 16; $lblDes.Top = 44; $lblDes.Text = (T 'about.des'); $lblDes.AutoSize = $true; $lblDes.MaximumSize = New-Object System.Drawing.Size(260, 0) # <- slightly narrower to make room for avatar
 	$lblVer = New-Object System.Windows.Forms.Label; $lblVer.Left = 16; $lblVer.Top = 88; $lblVer.Text = (T 'about.ver' @{ version = $Version }); $lblVer.AutoSize = $true
 	$lblAut = New-Object System.Windows.Forms.Label; $lblAut.Left = 16; $lblAut.Top = 110; $lblAut.Text = (T 'about.aut' @{ author = $Author }); $lblAut.AutoSize = $true
