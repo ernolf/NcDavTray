@@ -97,11 +97,7 @@ if (-not ("Nc.WinFormsOnce" -as [type])) {
 namespace Nc { public static class WinFormsOnce { public static bool Done; } }
 '@
 }
-if (-not [Nc.WinFormsOnce]::Done) {
-	[System.Windows.Forms.Application]::EnableVisualStyles()
-	try { [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false) } catch {}
-	[Nc.WinFormsOnce]::Done = $true
-}
+if (-not [Nc.WinFormsOnce]::Done) { [System.Windows.Forms.Application]::EnableVisualStyles(); try { [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false) } catch {}; [Nc.WinFormsOnce]::Done = $true }
 
 # Shell refresh (one-time type)
 if (-not ("Nc.Shell" -as [type])) {
@@ -286,11 +282,7 @@ function Copy-ObjectToState {
 function Write-StateToRegistry {
 	# Persist current $State into registry (installed mode)
 	if (-not (Test-Path $RegBase)) { New-Item -Path $RegBase -Force | Out-Null }
-	foreach ($k in $script:ConfigKeys) {
-		$type = if ($k -eq 'IntervalS') { 'DWord' } else { 'String' }
-		$val = if ($k -eq 'IntervalS') { [int]$State.IntervalS } else { $State.$k }
-		New-ItemProperty -Path $RegBase -Name $k -Value $val -PropertyType $type -Force | Out-Null
-	}
+	foreach ($k in $script:ConfigKeys) { $type = if ($k -eq 'IntervalS') { 'DWord' } else { 'String' }; $val = if ($k -eq 'IntervalS') { [int]$State.IntervalS } else { $State.$k }; New-ItemProperty -Path $RegBase -Name $k -Value $val -PropertyType $type -Force | Out-Null }
 	# DPAPI-protected password blob
 	New-ItemProperty -Path $RegBase -Name 'EncPass' -Value ($State.EncPass) -PropertyType String -Force | Out-Null
 }
@@ -341,21 +333,11 @@ function Get-CacheAgentState {
 	# Reads current state.json from the cache agent (if present)
 	$path = Get-CacheAgentStatePath
 	if (-not (Test-Path -LiteralPath $path)) { return $null }
-	try {
-		$raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
-		if (-not $raw) { return $null }
-		return ($raw | ConvertFrom-Json -ErrorAction Stop)
-	} catch { return $null }
+	try { $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop; if (-not $raw) { return $null }; return ($raw | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
 }
 function Send-CacheAgentCommand([Parameter(Mandatory = $true)][hashtable]$Command) {
-	$path = Get-CacheAgentCommandPath
-	$tmp = $path + '.tmp'
-	try {
-		$json = $Command | ConvertTo-Json -Depth 4
-		$json | Set-Content -LiteralPath $tmp -Encoding UTF8
-		Move-Item -LiteralPath $tmp -Destination $path -Force
-		return $true
-	} catch { return $false }
+	$path = Get-CacheAgentCommandPath; $tmp = $path + '.tmp'
+	try { $json = $Command | ConvertTo-Json -Depth 4; $json | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -LiteralPath $tmp -Destination $path -Force; return $true } catch { return $false }
 }
 function Request-CacheDeleteAll { $cmd = @{ Action = 'DeleteAll' }; return (Send-CacheAgentCommand -Command $cmd) }
 function Start-CacheAgentElevated([int]$IntervalSeconds = 3) {
@@ -396,11 +378,7 @@ function Ensure-CacheAgentRunning([int]$IntervalSeconds = 3) {
 	Write-Verbose ("[CacheGlue] Ensure-CacheAgentRunning: no watcher, starting elevated")
 	return (Start-CacheAgentElevated -IntervalSeconds $IntervalSeconds)
 }
-function Invoke-CacheAgentCommand([hashtable]$cmd,[int]$IntervalSeconds = 3) {
-	if (-not $cmd) { return $false }
-	if (-not (Ensure-CacheAgentRunning -IntervalSeconds $IntervalSeconds)) { return $false }
-	return (Send-CacheAgentCommand -Command $cmd)
-}
+function Invoke-CacheAgentCommand([hashtable]$cmd,[int]$IntervalSeconds = 3) { if (-not $cmd) { return $false }; if (-not (Ensure-CacheAgentRunning -IntervalSeconds $IntervalSeconds)) { return $false }; return (Send-CacheAgentCommand -Command $cmd) }
 function Start-CacheWatcher([int]$IntervalSeconds = 3) {
 	Write-Verbose ("[CacheGlue] Start-CacheWatcher: requested (IntervalSeconds={0})" -f $IntervalSeconds)
 	if ($IntervalSeconds -le 0) { $IntervalSeconds = 3 }
@@ -428,10 +406,7 @@ function Write-CachePidEntries([object[]]$entries) {
 		$json = $entries | ConvertTo-Json -Depth 4
 		$json | Set-Content -LiteralPath $tmp -Encoding UTF8
 		Move-Item -LiteralPath $tmp -Destination $path -Force
-	} catch {
-		Write-Verbose ("[CacheGlue] Write-CachePidEntries: ERROR {0}" -f $_.Exception.Message)
-		try { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } catch {}
-	}
+	} catch { Write-Verbose ("[CacheGlue] Write-CachePidEntries: ERROR {0}" -f $_.Exception.Message); try { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } catch {} }
 }
 function Get-AliveCachePidEntries {
 	$entries = Read-CachePidEntries
@@ -449,26 +424,16 @@ function Get-AliveCachePidEntries {
 }
 function Register-CacheInstance([int]$ProcessId,[string]$Role,[string]$Tag) {
 	Write-Verbose ("[CacheGlue] Register-CacheInstance: Pid={0}, Role={1}, Tag={2}" -f $ProcessId, $Role, $Tag)
-	$entries = Get-AliveCachePidEntries
-	$filtered = @()
-	foreach ($e in $entries) {
-		[int]$pidValue = 0
-		try { $pidValue = [int]$e.Pid } catch { $pidValue = 0 }
-		if ($pidValue -eq $ProcessId -and [string]$e.Role -eq $Role) { continue }
-		$filtered += $e
-	}
-	$new = [pscustomobject]@{Pid = $ProcessId; Role = $Role; Tag = $Tag}
-	$filtered += $new
-	Write-CachePidEntries $filtered
+	$entries = Get-AliveCachePidEntries; $filtered = @()
+	foreach ($e in $entries) { [int]$pidValue = 0; try { $pidValue = [int]$e.Pid } catch { $pidValue = 0 }; if ($pidValue -eq $ProcessId -and [string]$e.Role -eq $Role) { continue }; $filtered += $e }
+	$new = [pscustomobject]@{Pid = $ProcessId; Role = $Role; Tag = $Tag}; $filtered += $new; Write-CachePidEntries $filtered
 }
 function Get-CacheWatcherEntries {
 	# Get current alive entries (may be empty if pid file was deleted)
 	$alive = Get-AliveCachePidEntries
 	# Ensure that THIS process is registered as Ui in the pid set
 	$hasOwnUi = $false
-	if ($alive -and $alive.Count -gt 0) {
-		foreach ($e in $alive) { [int]$pidValue = 0; try { $pidValue = [int]$e.Pid } catch { $pidValue = 0 }; if ($pidValue -eq $PID -and [string]$e.Role -eq 'Ui') { $hasOwnUi = $true; break } }
-	}
+	if ($alive -and $alive.Count -gt 0) { foreach ($e in $alive) { [int]$pidValue = 0; try { $pidValue = [int]$e.Pid } catch { $pidValue = 0 }; if ($pidValue -eq $PID -and [string]$e.Role -eq 'Ui') { $hasOwnUi = $true; break } } }
 	if (-not $hasOwnUi) {
 		Write-Verbose "[CacheGlue] Get-CacheWatcherEntries: ensuring Ui registration for this process"
 		try { Register-CacheInstance -ProcessId $PID -Role 'Ui' -Tag 'main' } catch {} # This recreates pids.json if the watcher deleted it, and adds our own Ui entry
@@ -486,10 +451,7 @@ function Get-CacheWatcherClearOnExit {
 	$entries = Read-CachePidEntries
 	if (-not $entries -or $entries.Count -eq 0) { return $true }
 	foreach ($e in $entries) {
-		if ([string]$e.Role -eq 'Watcher') {
-			if ($e.PSObject.Properties.Name -contains 'ClearOnExit') { try { return [bool]$e.ClearOnExit } catch { return $true } }
-			return $true # Watcher without flag -> Default = true
-		}
+		if ([string]$e.Role -eq 'Watcher') { if ($e.PSObject.Properties.Name -contains 'ClearOnExit') { try { return [bool]$e.ClearOnExit } catch { return $true } }; return $true } # Watcher without flag -> Default = true
 	}
 	return $true # No watcher entered -> Default = true
 }
@@ -517,11 +479,8 @@ function CacheAgent([int]$OwnerPid,[int]$IntervalSeconds = 3) {
 	$script:CacheAgentStopRequested = $false
 	$script:CacheAgentExplicitStopRequested = $false
 	Register-CacheInstance -ProcessId $PID -Role 'Watcher' -Tag 'cache'
-	try {
-		# Ensure watcher entry has a ClearOnExit flag (default true)
-		$flag = Get-CacheWatcherClearOnExit
-		Set-CacheWatcherClearOnExit -value $flag
-	} catch {}
+	# Ensure watcher entry has a ClearOnExit flag (default true)
+	try { $flag = Get-CacheWatcherClearOnExit; Set-CacheWatcherClearOnExit -value $flag } catch {}
 	# WebDAV Redirector cache root for WebClient service
 	function Get-CacheSnapshot {
 		# Returns a hashtable with basic summary for the cache
@@ -555,11 +514,7 @@ function CacheAgent([int]$OwnerPid,[int]$IntervalSeconds = 3) {
 		$payload = [ordered]@{ TimestampUtc = (Get-Date).ToUniversalTime().ToString('o'); Snapshot = $Snapshot }
 		if ($LastAction) { $payload.LastAction = $LastAction }
 		if ($LastError) { $payload.LastError = $LastError }
-		try {
-			$json = $payload | ConvertTo-Json -Depth 6
-			$json | Set-Content -LiteralPath $tmpPath -Encoding UTF8
-			Move-Item -LiteralPath $tmpPath -Destination $statePath -Force
-		} catch { } # If we cannot write state, there is not much else we can do
+		try { $json = $payload | ConvertTo-Json -Depth 6; $json | Set-Content -LiteralPath $tmpPath -Encoding UTF8; Move-Item -LiteralPath $tmpPath -Destination $statePath -Force } catch { } # If we cannot write state, there is not much else we can do
 	}
 	function Get-PendingCommand {
 		# Reads and deletes command.json atomically. Returns a deserialized object or $null.
@@ -586,14 +541,7 @@ function CacheAgent([int]$OwnerPid,[int]$IntervalSeconds = 3) {
 			'deleteall' {
 				try {
 					$files = Get-ChildItem -LiteralPath $Root -Recurse -File -ErrorAction SilentlyContinue
-					foreach ($f in $files) {
-						try {
-							$len = [int64]$f.Length
-							Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
-							$result.DeletedCount++
-							$result.DeletedBytes += $len
-						} catch {}
-					}
+					foreach ($f in $files) { try { $len = [int64]$f.Length; Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop; $result.DeletedCount++; $result.DeletedBytes += $len } catch {} }
 					$result.Ok = $true
 				} catch { $result.Error = $_.Exception.Message }
 			}
@@ -624,9 +572,7 @@ function CacheAgent([int]$OwnerPid,[int]$IntervalSeconds = 3) {
 					try {
 						$snap = Get-CacheSnapshot
 						if ($snap -and $snap.Root -and (Test-Path -LiteralPath $snap.Root)) {
-							Get-ChildItem -LiteralPath $snap.Root -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
-								try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue } catch {}
-							}
+							Get-ChildItem -LiteralPath $snap.Root -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue } catch {} }
 						}
 					} catch {}
 				}
@@ -1082,28 +1028,14 @@ function Clear-PlainPassword { $State.EncPass = ''; try { Save-Config } catch {}
 # Compute SHA1 hex for stable mutex names
 function Get-Sha1Hex([Parameter(Mandatory = $true)][string]$Text) { $sha1 = [System.Security.Cryptography.SHA1]::Create(); $bytes = [Text.Encoding]::UTF8.GetBytes($Text); $hash = $sha1.ComputeHash($bytes); return (($hash | ForEach-Object { $_.ToString('x2') }) -join '') }
 # Acquire a named mutex (returns $true if we own it; outputs mutex via [ref])
-function Acquire-NamedMutex([Parameter(Mandatory = $true)][string]$Name, [ref]$MutexOut) {
-	try {
-		$createdNew = $false
-		$mutex = New-Object System.Threading.Mutex($true, $Name, [ref]$createdNew)
-		# Already held by another process
-		if (-not $createdNew) { try { $mutex.Dispose() } catch {}; return $false }
-		$MutexOut.Value = $mutex
-		return $true
-	} catch { return $false }
-}
+function Acquire-NamedMutex([Parameter(Mandatory = $true)][string]$Name, [ref]$MutexOut) { try { $createdNew = $false; $mutex = New-Object System.Threading.Mutex($true, $Name, [ref]$createdNew); if (-not $createdNew) { try { $mutex.Dispose() } catch {}; return $false }; $MutexOut.Value = $mutex; return $true } catch { return $false } }
 # Release + dispose helper (no-throw)
 function Release-MutexSafe($m) { try { if ($m) { $m.ReleaseMutex() | Out-Null } } catch {}; try { if ($m) { $m.Dispose() } } catch {} }
 # Compute absolute, normalized path for config.json
-function Get-ConfigFilePath {
-	# Adjust if you already have a canonical variable for this
-	if ($PortableMode) { return (Join-Path $HereDir 'config.json') }
-	return (Join-Path $InstallDir 'config.json')
-}
+function Get-ConfigFilePath { if ($PortableMode) { return (Join-Path $HereDir 'config.json') }; return (Join-Path $InstallDir 'config.json') }
 # Ensure single-instance per config.json (stores mutex in $script:cfgMutex)
 function Ensure-SingleInstanceForConfig {
-	# Use Global\ so different sessions/desktops collide properly
-	# Use GetFullPath (file may not exist yet)
+	# Use Global\ so different sessions/desktops collide properly. Use GetFullPath (file may not exist yet)
 	$cfgPath = [System.IO.Path]::GetFullPath((Get-ConfigFilePath)).ToLowerInvariant()
 	$key = 'Global\{0}_cfg_{1}' -f $AppName, (Get-Sha1Hex $cfgPath)
 	$mutexVar = $null
@@ -1376,9 +1308,7 @@ function Set-MP2LabelExactExact {
 			if ($key) { if ([string]::IsNullOrWhiteSpace($Label)) { try { $key.DeleteValue('_LabelFromReg', $false) } catch {} } else { $key.SetValue('_LabelFromReg', $Label, [Microsoft.Win32.RegistryValueKind]::String) }; $key.Close() }
 		} catch {}
 		try { $mp2.Close() } catch {}
-	} catch {
-		# best-effort; timer can retry
-	}
+	} catch {} # best-effort; timer can retry
 	# Nudge Explorer caches (best-effort)
 	try { Refresh-ShellIcons } catch {}; try { Refresh-AllExplorerViews } catch {}
 }
@@ -2194,24 +2124,17 @@ function Refresh-NeedsSetup {
 }
 function Update-TrayImmediate([switch]$TryMap) {
 	try {
-		# paused?
 		if ($script:Paused) { $script:tray.Icon = $script:icoRed; $varsPaused = @{ app = $AppName; drive = $State.Drive }; $script:tray.Text = T 'tray.paused' $varsPaused; return }
-		# needs initial setup?
 		if ($script:NeedsSetup) { $script:tray.Icon = $script:icoWarn; $varsNS = @{ app = $AppName }; $script:tray.Text = T 'tray.needs_setup' $varsNS; return }
-		# check server state (reachable / maintenance)
-		$st = Get-NcServerStatus
+		$st = Get-NcServerStatus # check server state (reachable / maintenance)
 		if (-not $st.Reachable) { if (Test-ValidDrive $State.Drive) { Unmap-DriveIfOurs -Force -RemoveProfile }; $script:tray.Icon = $script:icoRed; $varsOff = @{ app = $AppName }; $script:tray.Text = T 'tray.offline' $varsOff; return }
 		if ($st.Maintenance) { if (Test-ValidDrive $State.Drive) { Unmap-DriveIfOurs -Force -RemoveProfile }; $script:tray.Icon = $script:icoRed; $varsMaint = @{ app = $AppName }; $script:tray.Text = T 'tray.maintenance' $varsMaint; return }
 		# try to ensure mapped / update tray text
 		if (Test-DriveAccessible) { try { Rebuild-Icons } catch {}; $script:tray.Icon = $script:icoGre; $varsOn = @{ app = $AppName; drive = $State.Drive }; $script:tray.Text = T 'tray.online' $varsOn; try { Ensure-BrandingTick } catch {} }
 		# try remap now
 		elseif ($TryMap) { Unmap-DriveIfOurs; if (Map-Drive) { try { Rebuild-Icons } catch {}; $script:tray.Icon = $script:icoGre; $varsOn2 = @{ app = $AppName; drive = $State.Drive }; $script:tray.Text = T 'tray.online' $varsOn2; try { Ensure-BrandingTick } catch {} } else { $script:tray.Icon = $script:icoRed; $varsFail = @{ app = $AppName }; $script:tray.Text = T 'tray.mapping_failed' $varsFail } }
-		# not accessible and no TryMap -> treat as offline
-		else { $script:tray.Icon = $script:icoRed; $varsDisc = @{ app = $AppName }; $script:tray.Text = T 'tray.offline' $varsDisc }
-	} catch {
-		# any unexpected error -> generic tray.error
-		$script:tray.Icon = $script:icoRed; $varsErr = @{ app = $AppName }; $script:tray.Text = T 'tray.error' $varsErr
-	}
+		else { $script:tray.Icon = $script:icoRed; $varsDisc = @{ app = $AppName }; $script:tray.Text = T 'tray.offline' $varsDisc } # not accessible and no TryMap -> treat as offline
+	} catch { $script:tray.Icon = $script:icoRed; $varsErr = @{ app = $AppName }; $script:tray.Text = T 'tray.error' $varsErr } # any unexpected error -> generic tray.error
 }
 function Refresh-ShellIcons { try { [Nc.Shell]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero) } catch {} }
 function Set-TrayState([string]$Text = $null, $Icon = $null) { if (-not $script:tray) { return } <# no tray yet #>; if ($Icon) { $script:tray.Icon = $Icon }; if ($Text) { $script:tray.Text = $Text } }
@@ -3211,11 +3134,7 @@ function Sync-WebClientDeactivatedFlag {
 		$startRaw = [string]$Service.StartType
 		$script:ServiceDeactivated = ($startRaw -like 'Disabled*')
 		return $Service
-	} catch {
-		# Missing or inaccessible service -> treat as deactivated
-		$script:ServiceDeactivated = $true
-		return $null
-	}
+	} catch { $script:ServiceDeactivated = $true; return $null } # Missing or inaccessible service -> treat as deactivated
 }
 function Get-WebClientTriggerInfoText {
 	[CmdletBinding()] param([string]$ServiceName = 'WebClient', [ValidateSet('String','Window')] [string]$Output = 'String')
@@ -3862,11 +3781,7 @@ function Render-WebDavCacheTab([Parameter(Mandatory)] [System.Windows.Forms.TabP
 			if ($script:RenderCacheEntries -is [scriptblock]) { & $script:RenderCacheEntries }
 			Write-Verbose ("[CacheTab] RefreshCacheList: rendered {0} items" -f $script:CacheListView.Items.Count)
 			return $true
-		} catch {
-			try { $script:CacheListView.EndUpdate() } catch {}
-			Write-Verbose ("[CacheTab] RefreshCacheList error: {0}" -f $_.Exception.Message)
-			return $false
-		}
+		} catch { try { $script:CacheListView.EndUpdate() } catch {}; Write-Verbose ("[CacheTab] RefreshCacheList error: {0}" -f $_.Exception.Message); return $false }
 	}
 	$script:UpdateCacheWatcherUi = {
 		try {
@@ -3916,9 +3831,7 @@ function Render-WebDavCacheTab([Parameter(Mandatory)] [System.Windows.Forms.TabP
 			if ($script:ButtonCacheRefresh -and -not $script:ButtonCacheRefresh.IsDisposed) { $script:ButtonCacheRefresh.Enabled = $detailsEnabled }
 			if ($script:CacheWatcherLiveCheckbox -and -not $script:CacheWatcherLiveCheckbox.IsDisposed) { $script:CacheWatcherLiveCheckbox.Enabled = $detailsEnabled }
 			if ($script:CacheClearOnExitCheckbox -and -not $script:CacheClearOnExitCheckbox.IsDisposed) { $script:CacheClearOnExitCheckbox.Enabled = $detailsEnabled }
-		} catch {
-			Write-Verbose ("[CacheTab] UpdateCacheWatcherUi: ERROR {0}" -f $_.Exception.Message)
-		}
+		} catch { Write-Verbose ("[CacheTab] UpdateCacheWatcherUi: ERROR {0}" -f $_.Exception.Message) }
 	}
 	$script:InvokeCacheDeleteAll = {
 		if (-not $script:CacheWatcherPresent) { return }
@@ -3940,60 +3853,33 @@ function Render-WebDavCacheTab([Parameter(Mandatory)] [System.Windows.Forms.TabP
 				Write-Verbose "[CacheTab] Timer tick: querying watcher entries"
 				$watchersRaw = Get-CacheWatcherEntries
 				$watchers = @()
-				if ($watchersRaw) {
-					# Normalize to an array, even if a single PSCustomObject is returned
-					$watchers = @($watchersRaw)
-				}
+				if ($watchersRaw) { $watchers = @($watchersRaw) } # Normalize to an array, even if a single PSCustomObject is returned
 				$count = $watchers.Count
 				$anyWatcher = ($count -gt 0)
 				Write-Verbose ("[CacheTab] Timer tick: watchers.Count={0}, anyWatcher={1}" -f $count, $anyWatcher)
 				$script:CacheWatcherPresent = $anyWatcher
 				if ($anyWatcher -and $script:CacheClearOnExitCheckbox -and -not $script:CacheClearOnExitCheckbox.IsDisposed) {
-					try {
-						$flag = Get-CacheWatcherClearOnExit
-						if ($flag -ne $script:CacheClearOnExit) { $script:CacheClearOnExit = $flag; $script:CacheClearOnExitCheckbox.Checked = $flag }
-					} catch {}
+					try { $flag = Get-CacheWatcherClearOnExit; if ($flag -ne $script:CacheClearOnExit) { $script:CacheClearOnExit = $flag; $script:CacheClearOnExitCheckbox.Checked = $flag } } catch {}
 				}
 				# Transition: starting -> running
-				if ($anyWatcher -and $script:CacheStartPending) {
-					Write-Verbose "[CacheTab] Timer tick: watcher detected, clearing CacheStartPending"
-					$script:CacheStartPending = $false
-				}
+				if ($anyWatcher -and $script:CacheStartPending) { Write-Verbose "[CacheTab] Timer tick: watcher detected, clearing CacheStartPending"; $script:CacheStartPending = $false }
 				# Transition: stopping -> stopped
-				if (-not $anyWatcher -and $script:CacheStopPending) {
-					Write-Verbose "[CacheTab] Timer tick: no watcher, clearing CacheStopPending"
-					$script:CacheStopPending = $false
-				}
+				if (-not $anyWatcher -and $script:CacheStopPending) { Write-Verbose "[CacheTab] Timer tick: no watcher, clearing CacheStopPending"; $script:CacheStopPending = $false }
 				# When no watcher and no start pending: full reset of UI list
 				if (-not $anyWatcher -and -not $script:CacheStartPending) {
 					Write-Verbose "[CacheTab] Timer tick: no watcher and no start pending, clearing list"
-					if ($script:CacheListView -and -not $script:CacheListView.IsDisposed) {
-						$script:CacheListView.BeginUpdate()
-						$script:CacheListView.Items.Clear()
-						$script:CacheListView.EndUpdate()
-					}
+					if ($script:CacheListView -and -not $script:CacheListView.IsDisposed) { $script:CacheListView.BeginUpdate(); $script:CacheListView.Items.Clear(); $script:CacheListView.EndUpdate() }
 					$script:CacheEntries = @()
 					if ($script:UpdateCacheTotalLabel -is [scriptblock]) { & $script:UpdateCacheTotalLabel }
 				}
 				if ($script:UpdateCacheWatcherUi -is [scriptblock]) { & $script:UpdateCacheWatcherUi }
-				if ($script:CacheWatcherLiveUpdate -and $script:RefreshCacheList -is [scriptblock] -and $script:CacheWatcherPresent) {
-					Write-Verbose "[CacheTab] Timer tick: live update enabled, refreshing cache list"
-					[void](& $script:RefreshCacheList)
-				}
-			} catch {
-				Write-Verbose ("[CacheTab] Timer tick: ERROR {0}" -f $_.Exception.Message)
-			}
+				if ($script:CacheWatcherLiveUpdate -and $script:RefreshCacheList -is [scriptblock] -and $script:CacheWatcherPresent) { Write-Verbose "[CacheTab] Timer tick: live update enabled, refreshing cache list"; [void](& $script:RefreshCacheList) }
+			} catch { Write-Verbose ("[CacheTab] Timer tick: ERROR {0}" -f $_.Exception.Message) }
 		})
 	}
-	$t.Add_Enter({
-		if ($script:CacheAgentTimer) { $script:CacheAgentTimer.Enabled = $true }
-		if ($script:RefreshCacheList -is [scriptblock]) { [void](& $script:RefreshCacheList) }
-	})
+	$t.Add_Enter({ if ($script:CacheAgentTimer) { $script:CacheAgentTimer.Enabled = $true }; if ($script:RefreshCacheList -is [scriptblock]) { [void](& $script:RefreshCacheList) } })
 	# ---- wiring ----
-	$chkClearOnExit.Add_CheckedChanged({
-		$script:CacheClearOnExit = $this.Checked
-		if ($script:CacheWatcherPresent) { try { Set-CacheWatcherClearOnExit -value $script:CacheClearOnExit } catch {} }
-	})
+	$chkClearOnExit.Add_CheckedChanged({ $script:CacheClearOnExit = $this.Checked; if ($script:CacheWatcherPresent) { try { Set-CacheWatcherClearOnExit -value $script:CacheClearOnExit } catch {} } })
 	$btnRefresh.Add_Click({ & $script:InvokeCacheRefresh })
 	$btnDeleteAll.Add_Click({ & $script:InvokeCacheDeleteAll })
 	$lv.add_ColumnClick({
@@ -4005,20 +3891,12 @@ function Render-WebDavCacheTab([Parameter(Mandatory)] [System.Windows.Forms.TabP
 	# wiring for watcher controls: Start (with UAC shield) / Stop (no shield)
 	$script:CacheWatcherStartButton.Add_Click({
 		if ($script:CacheWatcherPresent) { return }
-		if (Start-CacheWatcher) {
-			$script:CacheStopPending = $false
-			$script:CacheStartPending = $true
-			try { Set-CacheWatcherClearOnExit -value $script:CacheClearOnExit } catch {}
-			if ($script:UpdateCacheWatcherUi -is [scriptblock]) { & $script:UpdateCacheWatcherUi }
-		} else { Show-ErrorT 'message.uac_admin_required' }
+		if (Start-CacheWatcher) { $script:CacheStopPending = $false; $script:CacheStartPending = $true; try { Set-CacheWatcherClearOnExit -value $script:CacheClearOnExit } catch {}; if ($script:UpdateCacheWatcherUi -is [scriptblock]) { & $script:UpdateCacheWatcherUi } } else { Show-ErrorT 'message.uac_admin_required' }
 	})
 	$script:CacheWatcherStopButton.Add_Click({
 		if (-not $script:CacheWatcherPresent) { return }
 		# Only warn if watcher is configured to clear cache on automatic exit
-		if (Get-CacheWatcherClearOnExit) {
-			$ans = (Ask-YesNoWarnT 'prompt.cache_watcher_stop_warn' @{ cache_clear_on_exit = (T 'box.cache_clear_on_exit') })
-			if ($ans -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-		}
+		if (Get-CacheWatcherClearOnExit) { $ans = (Ask-YesNoWarnT 'prompt.cache_watcher_stop_warn' @{ cache_clear_on_exit = (T 'box.cache_clear_on_exit') }); if ($ans -ne [System.Windows.Forms.DialogResult]::Yes) { return } }
 		try { $null = Send-CacheAgentCommand @{ Action = 'Stop' } } catch {}
 		$script:CacheStopPending = $true
 		if ($script:UpdateCacheWatcherUi -is [scriptblock]) { & $script:UpdateCacheWatcherUi }
@@ -4163,18 +4041,9 @@ if (-not $script:WebClientServicePrompted) {
 
 # BasicAuth = 0 -> one-time warning/fix prompt (before NeedsSetup / Tray)
 if (-not $script:BasicAuthWarned) {
-	$script:BasicAuthWarned = $true
-	$ba0 = $false
-	try {
-		if (Test-Path $RegWebClient) {
-			$p = Get-ItemProperty -Path $RegWebClient -ErrorAction SilentlyContinue
-			if ($p -and ($p.PSObject.Properties.Name -contains 'BasicAuthLevel')) { $ba0 = ([int]$p.BasicAuthLevel -eq 0) }
-		}
-	} catch {}
-	if ($ba0) {
-		$ans = Ask-YesNoWarnT 'prompt.basic_auth_disabled_enable_now' -Uac
-		if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) { if (-not (Invoke-WebClientWriteBroker @{ BasicAuthLevel = 1 })) { Show-ErrorT 'message.tuning_failed' } }
-	}
+	$script:BasicAuthWarned = $true; $ba0 = $false
+	try { if (Test-Path $RegWebClient) { $p = Get-ItemProperty -Path $RegWebClient -ErrorAction SilentlyContinue; if ($p -and ($p.PSObject.Properties.Name -contains 'BasicAuthLevel')) { $ba0 = ([int]$p.BasicAuthLevel -eq 0) } } } catch {}
+	if ($ba0) { $ans = Ask-YesNoWarnT 'prompt.basic_auth_disabled_enable_now' -Uac; if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) { if (-not (Invoke-WebClientWriteBroker @{ BasicAuthLevel = 1 })) { Show-ErrorT 'message.tuning_failed' } } }
 }
 try { if (-not [string]::IsNullOrWhiteSpace($State.Server)) { [void](Fetch-ServerFavicon $State.Server) } } catch {}
 
