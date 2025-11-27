@@ -10,7 +10,7 @@ try { if (-not $script:ThisScriptPath -and $PSCommandPath) { $script:ThisScriptP
 try { if (-not $script:ThisScriptPath -and $MyInvocation -and $MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) { $script:ThisScriptPath = $MyInvocation.MyCommand.Path } } catch {}
 
 # --- App meta ---
-$Version = '1.2.0'
+$Version = '1.2.1'
 $Author = '[ernolf] Raphael Gradenwitz'
 $ProjectUrl = 'https://github.com/ernolf/NcDavTray'
 
