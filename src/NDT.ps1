@@ -1031,12 +1031,10 @@ function Get-Sha1Hex([Parameter(Mandatory = $true)][string]$Text) { $sha1 = [Sys
 function Acquire-NamedMutex([Parameter(Mandatory = $true)][string]$Name, [ref]$MutexOut) { try { $createdNew = $false; $mutex = New-Object System.Threading.Mutex($true, $Name, [ref]$createdNew); if (-not $createdNew) { try { $mutex.Dispose() } catch {}; return $false }; $MutexOut.Value = $mutex; return $true } catch { return $false } }
 # Release + dispose helper (no-throw)
 function Release-MutexSafe($m) { try { if ($m) { $m.ReleaseMutex() | Out-Null } } catch {}; try { if ($m) { $m.Dispose() } } catch {} }
-# Compute absolute, normalized path for config.json
-function Get-ConfigFilePath { if ($PortableMode) { return (Join-Path $HereDir 'config.json') }; return (Join-Path $InstallDir 'config.json') }
 # Ensure single-instance per config.json (stores mutex in $script:cfgMutex)
 function Ensure-SingleInstanceForConfig {
 	# Use Global\ so different sessions/desktops collide properly. Use GetFullPath (file may not exist yet)
-	$cfgPath = [System.IO.Path]::GetFullPath((Get-ConfigFilePath)).ToLowerInvariant()
+	$cfgPath = [System.IO.Path]::GetFullPath($PortJson).ToLowerInvariant()
 	$key = 'Global\{0}_cfg_{1}' -f $AppName, (Get-Sha1Hex $cfgPath)
 	$mutexVar = $null
 	if (-not (Acquire-NamedMutex -Name $key -MutexOut ([ref]$mutexVar))) { Show-WarnT 'message.config_already_running' @{ path = $cfgPath }; exit 2 }
