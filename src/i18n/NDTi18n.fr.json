@@ -75,6 +75,7 @@
 	"menu.connect": "Se connecter",
 	"menu.disconnect": "Déconnecter",
 	"menu.exit": "Quitter",
+	"menu.open_explorer": "Ouvrir dans l’Explorateur",
 	"menu.settings": "Paramètres...",
 	"message.already_installed_appdata": "Déjà installé (AppData).",
 	"message.app_password_help": "1) Connectez-vous à votre compte Nextcloud dans votre navigateur.\r\n2) Ouvrez : {url}\r\n3) Faites défiler la page jusqu'en bas ('Appareils & sessions').\r\n4) Dans le champ 'Nom de l'application', saisissez '{app}'.\r\n5) Cliquez sur 'Créer un nouveau mot de passe d'application' et copiez le mot de passe généré dans l'application.",

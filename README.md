@@ -40,7 +40,7 @@ Map your Nextcloud server to a real Windows drive letter (e.g. `Z:`) and keep it
 * **WebClient** service (Windows WebDAV mini‑redirector)
 * **Nextcloud** reachable via **HTTPS** (connection uses a **Nextcloud App Password**)
 
-No administrator permissions are required except for the optional WebClient‑service handling.
+No administrator permissions are required except for the optional WebClient‑service handling and cache watcher.
 
 ---
 
@@ -69,7 +69,7 @@ Click **Save** → NcDavTray maps the drive, applies the icon/label, and keeps i
 ## Using the tray
 
 * **Left‑click**: shows a short status balloon (server, drive, subpath, state)
-* **Right‑click**: *Connect*, *Disconnect (pause)*, *Settings*, *About*, *Exit*
+* **Right‑click**: *Connect*, *Disconnect (pause)*, *Open in Explorer*, *Settings*, *About*, *Exit*
 
 ---
 

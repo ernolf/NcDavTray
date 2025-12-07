@@ -75,6 +75,7 @@
 	"menu.connect": "Verbinde jetzt",
 	"menu.disconnect": "Trennen",
 	"menu.exit": "Exit",
+	"menu.open_explorer": "Im Explorer öffnen",
 	"menu.settings": "Einstellungen...",
 	"message.already_installed_appdata": "Bereits installiert (AppData).",
 	"message.app_password_help": "1) Melden Sie sich im Browser in ihrem Nextcloud Server an.\r\n2) Öffnen Sie: {url}\r\n3) Scrollen Sie zum unteren Rand der Seite ('Geräte & Sitzungen').\r\n4) Geben Sie im Feld 'App-Name' '{app}' ein.\r\n5) Klicken Sie auf 'Neues App-Passwort erstellen' und kopieren Sie das generierte Passwort in diese App.",

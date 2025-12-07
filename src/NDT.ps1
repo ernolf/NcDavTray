@@ -671,6 +671,7 @@ $script:I18N_Embedded_En = @'
 	"menu.connect": "Connect now",
 	"menu.disconnect": "Disconnect",
 	"menu.exit": "Exit",
+	"menu.open_explorer": "Open in Explorer",
 	"menu.settings": "Settings...",
 	"message.already_installed_appdata": "Already installed (AppData).",
 	"message.app_password_help": "1) Sign in to your Nextcloud in the browser.\r\n2) Open: {url}\r\n3) Scroll to the bottom of the page ('Devices & sessions').\r\n4) In the field 'App name', enter '{app}'.\r\n5) Click 'Create new app password' and copy the generated password into the app.",
@@ -2731,6 +2732,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		}
 		if ($miConn) { & $setTxt $miConn (T 'menu.connect') }
 		if ($miDisc) { & $setTxt $miDisc (T 'menu.disconnect') }
+		if ($miOpen) { & $setTxt $miOpen (T 'menu.open_explorer') }
 		if ($miSett) { & $setTxt $miSett (T 'menu.settings') }
 		if ($miAbout) { & $setTxt $miAbout (T 'menu.about') }
 		if ($miExit) { & $setTxt $miExit (T 'menu.exit') }
@@ -4091,6 +4093,7 @@ $null = $menu.Items.Add($miMode)
 $menu.Items.Add('-') | Out-Null
 $miConn = $menu.Items.Add((T 'menu.connect'))
 $miDisc = $menu.Items.Add((T 'menu.disconnect'))
+$miOpen = $menu.Items.Add((T 'menu.open_explorer'))
 $miSett = $menu.Items.Add((T 'menu.settings'))
 $menu.Items.Add('-') | Out-Null
 $miAbout = $menu.Items.Add((T 'menu.about'))
@@ -4102,14 +4105,15 @@ function Update-MenuState {
 		# Refresh deactivated flag from current StartType
 		Sync-WebClientDeactivatedFlag | Out-Null
 		# When the WebClient service is deactivated, both actions are meaningless
-		if ($script:ServiceDeactivated) { $miConn.Enabled = $false; $miDisc.Enabled = $false; return }
+		if ($script:ServiceDeactivated) { $miConn.Enabled = $false; $miDisc.Enabled = $false; $miOpen.Enabled = $false; return }
 		$isConnected = Test-DriveAccessible
 		$hasPassword = if ($PortableMode) { -not [string]::IsNullOrWhiteSpace((Get-PlainPassword)) } else { $true }
 		# Connect is meaningful if paused OR not connected, and (in portable mode) a password exists
 		$miConn.Enabled = (($script:Paused -or -not $isConnected) -and $hasPassword)
-		# Disconnect is meaningful if connected and not paused
+		# "Disconnect" and "Open in Explorer" are meaningful only if connected and not paused
 		$miDisc.Enabled = ($isConnected -and -not $script:Paused)
-	} catch { $miConn.Enabled = $true; $miDisc.Enabled = $false }
+		$miOpen.Enabled = ($isConnected -and -not $script:Paused)
+	} catch { $miConn.Enabled = $true; $miDisc.Enabled = $false; $miOpen.Enabled = $false }
 }
 function Invoke-NcTrayDisconnect {
 	# Same behavior as tray menu "Disconnect": pause, unmap, update tray + menu
@@ -4142,9 +4146,10 @@ $miConn.add_Click({
 	else { $varsFail = @{ app = $AppName }; $txtFail = T 'tray.mapping_failed' $varsFail; Set-TrayState -Icon $script:icoRed -Text $txtFail }
 	Update-MenuState
 })
-
 # Disconnect now and pause the tick
 $miDisc.add_Click({ Invoke-NcTrayDisconnect })
+# Open mapped drive in Explorer
+$miOpen.add_Click({ try { Start-Process explorer.exe -ArgumentList $State.Drive } catch {} })
 $miSett.add_Click({ [void](Show-SettingsDialog) })
 $miAbout.add_Click({
 	# Simple About dialog

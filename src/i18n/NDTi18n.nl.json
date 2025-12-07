@@ -75,6 +75,7 @@
 	"menu.connect": "Nu verbinden",
 	"menu.disconnect": "Ontkoppelen",
 	"menu.exit": "Exit",
+	"menu.open_explorer": "Openen in Verkenner",
 	"menu.settings": "Instellingen...",
 	"message.already_installed_appdata": "Al geïnstalleerd (AppData).",
 	"message.app_password_help": "1) Meld u aan bij uw Nextcloud in de browser.\r\n2) Open: {url}\r\n3) Scrol naar de onderste rand ('Apparaten & sessies').\r\n4) Voer in het veld 'App naam' '{app}' in.\r\n5) Klik op 'Creëer een nieuw app wachtwoord' en kopieer het gegenereerde wachtwoord naar deze app.",

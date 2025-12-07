@@ -75,6 +75,7 @@
 	"menu.connect": "Conectar",
 	"menu.disconnect": "Desconectar",
 	"menu.exit": "Salir",
+	"menu.open_explorer": "Abrir en el Explorador",
 	"menu.settings": "Opciones...",
 	"message.already_installed_appdata": "Ya instalado (AppData).",
 	"message.app_password_help": "1) Inicia sesión en tu cuenta de Nextcloud en el navegador.\r\n2) Abre: {url}\r\n3) Desplázate hasta la parte inferior de la página ('Dispositivos y sesiones').\r\n4) En el campo 'Nombre de la app', introduce '{app}'.\r\n5) Haz clic en 'Crear nueva contraseña de app' y copia la contraseña generada en la app.",
