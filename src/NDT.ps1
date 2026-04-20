@@ -1061,20 +1061,25 @@ function Ensure-DriveGuard([Parameter(Mandatory = $true)][string]$Drive) {
 function Encode-OcsPath([string]$path) { $norm = Normalize-SubPath $path; if ([string]::IsNullOrWhiteSpace($norm)) { return '' }; return [Uri]::EscapeDataString($norm) }
 # Basic auth header for HttpWebRequest
 function New-BasicAuthHeader([string]$user, [string]$pass) { 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$user`:$pass")) }
+# Shared GET request factory — sets TLS 1.2, UA, timeout, redirect, and Accept.
+function New-HttpGetRequest([string]$uri, [int]$timeoutMs = 4000, [string]$accept = 'application/json') {
+	try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 } catch {}
+	$req = [System.Net.HttpWebRequest]::Create($uri)
+	$req.Method = 'GET'
+	$req.UserAgent = "ernolfs $AppName v$Version"
+	$req.Timeout = $timeoutMs
+	$req.ReadWriteTimeout = $timeoutMs
+	$req.AllowAutoRedirect = $true
+	$req.Accept = $accept
+	return $req
+}
 # RAW OCS folder-tree call that returns status code + raw + parsed JSON.
 function Invoke-NcOcsFolderTreeRaw {
 	[CmdletBinding()] param( [Parameter(Mandatory)][string]$Server, [Parameter(Mandatory)][string]$User, [Parameter(Mandatory)][string]$Pass, [string]$EncodedPath, [int]$Depth = 0 )
-	try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 } catch {}
 	$uri = "https://$Server/ocs/v2.php/apps/files/api/v1/folder-tree?depth=$Depth"
 	if ($null -ne $EncodedPath) { $uri += "&path=$EncodedPath" } else { $uri += "&path=%2F" }
 	try {
-		$req = [System.Net.HttpWebRequest]::Create($uri)
-		$req.Method = 'GET'
-		$req.UserAgent = "ernolfs $AppName v$Version"
-		$req.Timeout = 4000
-		$req.ReadWriteTimeout = 4000
-		$req.AllowAutoRedirect = $true
-		$req.Accept = 'application/json'
+		$req = New-HttpGetRequest $uri
 		$req.Headers['OCS-APIRequest'] = 'true'
 		$req.Headers['Authorization'] = New-BasicAuthHeader $User $Pass
 		$resp = $req.GetResponse()
@@ -1132,16 +1137,9 @@ function Test-NcFolderExists([string]$subPath) {
 function Get-NcServerStatus {
 	$fail = [pscustomobject]@{ Reachable = $false; Maintenance = $false; Installed = $false; Json = $null }
 	if ([string]::IsNullOrWhiteSpace($State.Server)) { return $fail }
-	try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 } catch {}
 	$uri = "https://$($State.Server)/status.php"
 	try {
-		$req = [System.Net.HttpWebRequest]::Create($uri)
-		$req.Method = 'GET'
-		$req.UserAgent = "ernolfs $AppName v$Version"
-		$req.Timeout = 4000
-		$req.ReadWriteTimeout = 4000
-		$req.AllowAutoRedirect = $true
-		$req.Accept = 'application/json'
+		$req = New-HttpGetRequest $uri
 		$resp = $req.GetResponse()
 		try {
 			$sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
@@ -1926,15 +1924,8 @@ function Set-PictureImageSafe([System.Windows.Forms.PictureBox]$pb, [System.Draw
 function Clear-PictureImage([System.Windows.Forms.PictureBox]$pb) { try { if ($pb -and $pb.Image) { $pb.Image.Dispose(); $pb.Image = $null } } catch {} }
 function Get-HttpImage([string]$url, [string]$user = $null, [string]$pass = $null, [int]$timeoutMs = 3000, [string]$accept = 'image/*') {
 	try {
-		try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 } catch {}
-		$req = [System.Net.HttpWebRequest]::Create($url)
-		$req.Method = 'GET'
-		$req.UserAgent = "ernolfs $AppName v$Version"
-		$req.Timeout = $timeoutMs
-		$req.ReadWriteTimeout = $timeoutMs
-		$req.AllowAutoRedirect = $true
-		$req.Accept = $accept
-		if ($user -and $pass) { $pair = [System.Text.Encoding]::ASCII.GetBytes("$user`:$pass"); $req.Headers['Authorization'] = 'Basic ' + [Convert]::ToBase64String($pair) }
+		$req = New-HttpGetRequest $url $timeoutMs $accept
+		if ($user -and $pass) { $req.Headers['Authorization'] = New-BasicAuthHeader $user $pass }
 		$resp = $req.GetResponse()
 		try {
 			$stream = $resp.GetResponseStream()
@@ -1951,14 +1942,7 @@ function Fetch-ServerFavicon([string]$server) {
 	$url = "https://$server/index.php/apps/theming/favicon/core"
 	$icoPath = Get-FavIconFilePath
 	try {
-		try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 } catch {}
-		$req = [System.Net.HttpWebRequest]::Create($url)
-		$req.Method = 'GET'
-		$req.UserAgent = "ernolfs $AppName v$Version"
-		$req.Timeout = 3000
-		$req.ReadWriteTimeout = 3000
-		$req.AllowAutoRedirect = $true
-		$req.Accept = 'image/x-icon, image/*'
+		$req = New-HttpGetRequest $url 3000 'image/x-icon, image/*'
 		$resp = $req.GetResponse()
 		try {
 			$ms = New-Object System.IO.MemoryStream
