@@ -9,3 +9,8 @@ dist/
 Thumbs.db
 *.user
 *.suo
+
+.vs/
+
+# local tooling notes (not part of the project)
+.secrets/
