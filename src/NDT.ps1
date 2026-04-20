@@ -394,7 +394,7 @@ function Read-CachePidEntries {
 		if (-not $raw) { Write-Verbose "[CacheGlue] Read-CachePidEntries: pid file is empty"; return @() }
 		$data = $raw | ConvertFrom-Json -ErrorAction Stop
 		if ($null -eq $data) { Write-Verbose "[CacheGlue] Read-CachePidEntries: json is null"; return @() }
-		if ($data -is [System.Collections.IEnumerable] -and -not ($data -is [string])) { $result = @($data) } else { $result = @($data) }
+		$result = @($data)
 		Write-Verbose ("[CacheGlue] Read-CachePidEntries: read {0} entries" -f $result.Count)
 		return $result
 	} catch { Write-Verbose ("[CacheGlue] Read-CachePidEntries: ERROR {0}" -f $_.Exception.Message); return @() }
@@ -2246,7 +2246,6 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		$script:UserAvatarBmp = $null
 		Clear-PictureImage $script:PicAvatar; $script:AvatarTimer.Stop()
 		if (-not [string]::IsNullOrWhiteSpace($script:TextServer.Text) -and -not [string]::IsNullOrWhiteSpace($script:TextUser.Text)) { $script:AvatarTimer.Start() }
-		& $script:UpdateSaveButton
 	})
 	# Initial favicon fetch + assign
 	if ([string]::IsNullOrWhiteSpace($script:TextServer.Text)) { Clear-PictureImage $script:PicFavicon }
@@ -2989,12 +2988,11 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 			$script:CacheAgeNumeric = $null
 			$script:ButtonCacheRefresh = $null
 			$script:ButtonCacheDeleteAll = $null
-			$script:Tabs = $null; $script:TabBasic = $null; $script:TabTuning = $null
 		} catch {}
 	})
 }
 # --- Broker: elevate once, apply registry values under HKLM and restart WebClient ---
-function global:Invoke-WebClientWriteBroker {
+function Invoke-WebClientWriteBroker {
 	param([hashtable]$ValuesToSet)
 	# Basic sanity check
 	if (-not $ValuesToSet -or $ValuesToSet.Count -eq 0) { return $false }
@@ -3806,7 +3804,7 @@ function Render-WebDavCacheTab([Parameter(Mandatory)] [System.Windows.Forms.TabP
 				$script:CacheWatcherStopButton.Visible = $false
 			}
 			Write-Verbose ("[CacheTab] UpdateCacheWatcherUi: statusKey={0}" -f $statusKey)
-			$script:CacheWatcherStatusLabel.Text = (T label.cache_watcher_status @{ status = (T $statusKey) })
+			$script:CacheWatcherStatusLabel.Text = (T 'label.cache_watcher_status' @{ status = (T $statusKey) })
 			# disable details while stopping, otherwise coupled to watcher presence
 			$detailsEnabled = $anyWatcher -and -not $stopping
 			if ($script:LabelCacheInfo -and -not $script:LabelCacheInfo.IsDisposed) { $script:LabelCacheInfo.Enabled = $detailsEnabled }
@@ -3960,8 +3958,8 @@ function Start-InstalledInstance {
 		$ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 		if (-not (Test-Path -LiteralPath $ps)) { $ps = 'powershell.exe' }
 		# Preserve STA & EP; no args by default – you can extend if needed
-		$args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-File', "`"$inst`"")
-		Start-Process -FilePath $ps -ArgumentList $args -WindowStyle Hidden | Out-Null
+		$psArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-File', "`"$inst`"")
+		Start-Process -FilePath $ps -ArgumentList $psArgs -WindowStyle Hidden | Out-Null
 		return $true
 	} catch { Write-Warning ("Start-InstalledInstance failed: {0}" -f $_.Exception.Message); return $false }
 }
