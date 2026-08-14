@@ -1,0 +1,2 @@
+# Where the start menu shortcut of the named program lives.
+function Get-StartMenuShortcutPath([string]$Name = $AppName) { $sm = [Environment]::GetFolderPath('StartMenu'); return (Join-Path (Join-Path $sm 'Programs') "$Name.lnk") }

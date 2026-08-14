@@ -1,0 +1,2 @@
+# Acquire a named mutex (returns $true if we own it; outputs mutex via [ref])
+function Acquire-NamedMutex([Parameter(Mandatory = $true)][string]$Name, [ref]$MutexOut) { try { $createdNew = $false; $mutex = New-Object System.Threading.Mutex($true, $Name, [ref]$createdNew); if (-not $createdNew) { try { $mutex.Dispose() } catch {}; return $false }; $MutexOut.Value = $mutex; return $true } catch { return $false } }

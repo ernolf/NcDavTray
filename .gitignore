@@ -1,4 +1,5 @@
 # build output / packages
+build/
 dist/
 *.zip
 *.msi

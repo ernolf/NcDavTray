@@ -1,0 +1,1099 @@
+# NDT.ps1
+
+# SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[CmdletBinding()] param([ValidateSet('', 'Install', 'ExportPortable', 'CacheAgent')] [string]$Action = '', [switch]$Watchdog, [string]$MainMutexName, [int]$OwnerPid, [int]$IntervalSeconds = 3)
+
+# --- Anchor current script path/name/dir for later use (PS 5.1 safe) ---
+try { if (-not $script:ThisScriptPath -and $PSCommandPath) { $script:ThisScriptPath = $PSCommandPath } } catch {}
+try { if (-not $script:ThisScriptPath -and $MyInvocation -and $MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) { $script:ThisScriptPath = $MyInvocation.MyCommand.Path } } catch {}
+
+# --- App meta ---
+#__inc:meta/Version.ps1__
+#__inc:meta/Author.ps1__
+#__inc:meta/ProjectUrl.ps1__
+#__inc:meta/AppName.ps1__
+
+# ================================================================
+#	Bootstrap / Process requirements (PowerShell 5.1 + STA)
+# ================================================================
+# Not for the watchdog: the relaunch would drop its arguments, and it needs
+# neither a window nor an apartment state -- it never touches WinForms.
+if (-not $Watchdog) {
+	$needWinPS51 = ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -lt 1)
+	$needSTA = ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA')
+	# The copy that takes over runs where the script lies, not where it was called
+	# from: a process holds its own directory open for as long as it lives.
+	if ($needWinPS51 -or $needSTA) { $exe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"; $args = "-WindowStyle Hidden -NoProfile -STA -ExecutionPolicy Bypass -File `"$PSCommandPath`""; Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory (Split-Path -Parent $PSCommandPath) -WindowStyle Hidden | Out-Null; exit }
+}
+
+# ================================================================
+#	Native types (P/Invoke) and WinForms setup
+#	- Nc.Dpi, Nc.NetUse, Nc.WinFormsOnce, Nc.Shell
+# ================================================================
+#__inc:modules/native-types.ps1__
+
+$ErrorActionPreference = 'Stop'
+
+# ================================================================
+#	App constants, paths, globals, state
+# ================================================================
+# ---------- Constants / paths ----------
+$AppNameShort = 'NDT'
+$HereDir = Split-Path -Parent $PSCommandPath
+$ScriptFile = [System.IO.Path]::GetFileName($PSCommandPath)
+$RegMP2 = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2'
+$RegWebClient = 'HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters'
+$InstallDir = Join-Path $env:LOCALAPPDATA $AppName
+$InstallBin = Join-Path $InstallDir $ScriptFile
+$IsInstalled = ($PSCommandPath -ieq (Join-Path $InstallDir $ScriptFile))
+$PortableMode = -not $IsInstalled
+$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+# An installed copy keeps the list in the registry, where the account passwords
+# have to live anyway: DPAPI binds them to this user on this machine, which is
+# exactly what a file carried around on a stick cannot promise. A portable copy
+# keeps it next to the script, as it always did.
+$PortJson = Join-Path $HereDir ("{0}_config.json" -f $AppNameShort)
+# What a portable copy up to 1.2.2 wrote instead -- see Import-LegacyPortableConfig.
+$LegacyPortJson = Join-Path $HereDir ("{0}_portable.json" -f $AppName)
+# The passwords of a portable copy, protected by a passphrase rather than by DPAPI:
+# DPAPI would bind them to the machine the stick happens to be plugged into.
+$SecretPath = Join-Path $HereDir ("{0}_secret.dat" -f $AppNameShort)
+$WDMutex = ("Local\{0}Watchdog" -f $AppName)
+$Logo96B64 = @'
+#__b64:assets/logo-96.png__
+'@
+$LogoIcoB64 = @'
+#__b64:assets/logo.ico__
+'@
+$ernolfB64 = @'
+#__b64:assets/ernolf.png__
+'@
+
+# --- One-time global flags (the shared settings tabs read these) ---
+if ($null -eq $script:ServiceDeactivated) { $script:ServiceDeactivated = $false }
+if ($null -eq $script:CacheWatcherLiveUpdate) { $script:CacheWatcherLiveUpdate = $true }
+if ($null -eq $script:CacheWatcherPanel) { $script:CacheWatcherPanel = $null }
+if ($null -eq $script:CacheWatcherDetailsPanel) { $script:CacheWatcherDetailsPanel = $null }
+if ($null -eq $script:CacheWatcherStatusLabel) { $script:CacheWatcherStatusLabel = $null }
+if ($null -eq $script:CacheWatcherLiveCheckbox) { $script:CacheWatcherLiveCheckbox = $null }
+if ($null -eq $script:CacheWatcherPresent) { $script:CacheWatcherPresent = $false }
+if ($null -eq $script:CacheStopPending) { $script:CacheStopPending = $false }
+if ($null -eq $script:CacheStartPending) { $script:CacheStartPending = $false }
+if ($null -eq $script:LastCacheSnapshotSignature) { $script:LastCacheSnapshotSignature = $null }
+if ($null -eq $script:CacheForceRefreshOnce) { $script:CacheForceRefreshOnce = $false }
+
+# --- Global UI metrics (compute once, DPI-aware) ---
+# Default button height (non-shield buttons)
+if (-not $script:ButtonH) { $script:ButtonH = 28 }
+# Extra high button height (non-shield buttons)
+if (-not $script:ButtonXH) { $script:ButtonXH = 32 }
+# Default vertical padding for button rows
+if (-not $script:ButtonPadY) { $script:ButtonPadY = 8 }
+# Minimal logical width for small dialog buttons (OK / Yes / No / Cancel)
+if (-not $script:ButtonMinW) { $script:ButtonMinW = 80 }
+# Top offset for inline copy URL button
+if (-not $script:ButtonCopyOffsetY) { $script:ButtonCopyOffsetY = -2 }
+# Button height big enough for the shield + breathing space
+if (-not $script:UacButtonH) { $script:UacButtonH = 40; $script:UacPadY = 0 <# vertical padding in panels #>; $script:UacFooterH = $script:UacButtonH + (2 * $script:UacPadY); $script:UacGroupH = $script:UacButtonH + (2 * $script:UacPadY) }
+
+# --- UI font (tray glyph & any small labels) ---
+$UiFontFamily = 'Tahoma'
+$UiFontStyleBold = [System.Drawing.FontStyle]::Bold
+$UiFontStyleRegular = [System.Drawing.FontStyle]::Regular
+
+# Optional: fall back if the font isn't installed
+if (-not (([System.Drawing.FontFamily]::Families | ForEach-Object Name) -contains $UiFontFamily)) { $UiFontFamily = 'Segoe UI' }
+
+# ---------- State ----------
+# Global settings plus the list of configured mounts. Everything in $State is
+# persisted. The share passwords are not: they are asked for whenever a mount is
+# established and live in $script:Runtime, keyed by the entry's Id, for as long
+# as the process runs.
+$State = [pscustomobject]@{ SchemaVersion = 1; IntervalS = 15; LangPref = ''; Mounts = @() }
+$script:Runtime = @{}
+$script:MapMutexes = @{}; $script:DriveGuards = @{}
+# One tray record per mount, keyed by the entry's Id, plus the always present
+# application icon that owns the program menu.
+$script:Trays = @{}; $script:TrayManager = $null; $script:Quitting = $false
+# Set for as long as something is mapping or unmapping. Everything in here runs
+# on the one UI thread, but not one after the other: a modal dialog and the
+# shell notification both pump the message loop, and the poll timer fires into
+# it. Two runs over the same drives and the same tray icons undo each other.
+$script:MountBusy = $false
+# The edit windows that are open, keyed by the Id of the mount each one belongs
+# to -- one entry may be open once, and a second attempt is answered with the
+# window that is already there.
+$script:MountDialogs = @{}
+# --- Image cache (in-memory) ---
+$script:ServerFaviconBmp = $null
+
+# ================================================================
+#	Internationalization (i18n)
+# ================================================================
+
+# Embedded English fallback. Keep it flat "dot" keys for simplicity.
+# NOTE: UTF-8 here-string; safe in PS 5.1.
+# The #__i18n: placeholder puts in only the keys this script actually refers to,
+# not the whole family pack -- see tools\build.ps1.
+$script:I18N_Embedded_En = @'
+#__i18n:i18n/NDTi18n.en.json__
+'@
+
+#__inc:modules/i18n-state.ps1__
+#__inc:modules/Convert-JsonToHashtable.ps1__
+#__inc:modules/Get-SystemLang2.ps1__
+#__inc:modules/Resolve-I18nFilePath.ps1__
+#__inc:modules/Get-I18nBaseName.ps1__
+#__inc:modules/Get-AvailableLanguages.ps1__
+#__inc:modules/Initialize-I18n.ps1__
+#__inc:modules/T.ps1__
+
+# ================================================================
+#	Message boxes
+# ================================================================
+#__inc:modules/Hook-FormDpi.ps1__
+#__inc:modules/Hook-FormScreen.ps1__
+#__inc:modules/Get-EmbeddedIconBytes.ps1__
+#__inc:modules/Ensure-AppBrandIcons.ps1__
+#__inc:modules/Apply-BrandIconToForm.ps1__
+#__inc:modules/Get-EmbeddedImage.ps1__
+#__inc:modules/Clear-PictureImage.ps1__
+#__inc:modules/Set-PictureImageSafe.ps1__
+#__inc:modules/Show-AboutDialog.ps1__
+#__inc:modules/Enable-UacShield.ps1__
+#__inc:modules/Enable-FlatUacShield.ps1__
+#__inc:modules/Show-CustomMsgBoxT.ps1__
+#__inc:modules/Show-InfoT.ps1__
+#__inc:modules/Show-WarnT.ps1__
+#__inc:modules/Show-ErrorT.ps1__
+#__inc:modules/Ask-YesNoInfoT.ps1__
+#__inc:modules/Ask-YesNoWarnT.ps1__
+#__inc:modules/Ask-YesNoQuestT.ps1__
+#__inc:modules/Ask-YesNoCancelQuestT.ps1__
+#__inc:modules/Show-HelpT.ps1__
+
+# ================================================================
+#	Helpers to ensure Single Instance (Mutex)
+# ================================================================
+#__inc:modules/Get-Sha1Hex.ps1__
+#__inc:modules/Acquire-NamedMutex.ps1__
+#__inc:modules/Release-MutexSafe.ps1__
+#__inc:modules/Ensure-SingleInstanceForConfig.ps1__
+#__inc:modules/Get-DriveGuardName.ps1__
+#__inc:modules/Ensure-DriveGuard.ps1__
+#__inc:modules/Remove-DriveGuard.ps1__
+#__inc:modules/Get-MapMutexName.ps1__
+#__inc:modules/Ensure-MapMutex.ps1__
+#__inc:modules/Test-MapMutexOwned.ps1__
+#__inc:modules/Remove-LegacyFavIcon.ps1__
+#__inc:modules/Remove-MapMutex.ps1__
+
+# ================================================================
+#	Shared state (install paths, instances)
+# ================================================================
+#__inc:modules/Get-ThisScriptPath.ps1__
+#__inc:modules/Get-LauncherFor.ps1__
+#__inc:modules/Set-StartupRunKey.ps1__
+#__inc:modules/Is-StartupRunKeyEnabled.ps1__
+#__inc:modules/Get-StartMenuShortcutPath.ps1__
+#__inc:modules/Get-DesktopShortcutPath.ps1__
+#__inc:modules/New-Shortcut.ps1__
+#__inc:modules/Shortcut-Exists.ps1__
+#__inc:modules/Ensure-Shortcut.ps1__
+#__inc:modules/Test-IsPortableFolder.ps1__
+#__inc:modules/Write-PortableLaunchers.ps1__
+#__inc:modules/Get-StateDir.ps1__
+#__inc:modules/Get-UsedServerIdentities.ps1__
+#__inc:modules/Get-InstanceStateDir.ps1__
+#__inc:modules/Get-InstanceListPath.ps1__
+#__inc:modules/Read-InstanceEntries.ps1__
+#__inc:modules/Write-InstanceEntries.ps1__
+#__inc:modules/Get-AliveInstanceEntries.ps1__
+#__inc:modules/Register-Instance.ps1__
+#__inc:modules/Unregister-Instance.ps1__
+#__inc:modules/Get-InstanceEntriesByRole.ps1__
+#__inc:modules/Test-AnyInstanceRole.ps1__
+
+# ================================================================
+#	Cache agent glue
+# ================================================================
+#__inc:modules/Get-CacheAgentStateDir.ps1__
+#__inc:modules/Get-CacheAgentStatePath.ps1__
+#__inc:modules/Get-CacheAgentCommandPath.ps1__
+#__inc:modules/Get-CacheAgentState.ps1__
+#__inc:modules/Send-CacheAgentCommand.ps1__
+#__inc:modules/Request-CacheDeleteAll.ps1__
+#__inc:modules/Start-CacheAgentElevated.ps1__
+#__inc:modules/Ensure-CacheAgentRunning.ps1__
+#__inc:modules/Start-CacheWatcher.ps1__
+#__inc:modules/Get-CacheWatcherEntries.ps1__
+#__inc:modules/Get-CacheWatcherClearOnExit.ps1__
+#__inc:modules/Set-CacheWatcherClearOnExit.ps1__
+
+# ================================================================
+#	Cache agent loop (runs when -Action CacheAgent)
+# ================================================================
+#__inc:modules/CacheAgent.ps1__
+
+# ================================================================
+#	Mount entries and the mapping descriptor
+# ================================================================
+#__inc:modules/Normalize-SubPath.ps1__
+#__inc:modules/New-MountSpec.ps1__
+#__inc:modules/New-MountEntry.ps1__
+#__inc:modules/ConvertTo-MountEntry.ps1__
+#__inc:modules/New-MountSpecFromEntry.ps1__
+#__inc:modules/Get-MountDisplayName.ps1__
+
+# ================================================================
+#	The stored mount list (registry when installed, json when portable)
+# ================================================================
+#__inc:modules/Get-RegBase.ps1__
+#__inc:modules/Get-MountsRegPath.ps1__
+#__inc:modules/Read-MountEntriesFromRegistry.ps1__
+#__inc:modules/Write-MountEntry.ps1__
+#__inc:modules/Write-MountEntriesToRegistry.ps1__
+#__inc:modules/account-secret-cache.ps1__
+#__inc:modules/New-RandomBytes.ps1__
+#__inc:modules/Protect-PortableSecret.ps1__
+#__inc:modules/Unprotect-PortableSecret.ps1__
+#__inc:modules/Ensure-SecretPassphrase.ps1__
+#__inc:modules/Read-PortableSecretStore.ps1__
+#__inc:modules/Save-PortableSecretStore.ps1__
+#__inc:modules/Unlock-PortableSecretStore.ps1__
+#__inc:modules/Get-PortableSecretPayload.ps1__
+#__inc:modules/Get-AccountsRegPath.ps1__
+#__inc:modules/Get-AccountKey.ps1__
+#__inc:modules/Get-AccountSecret.ps1__
+#__inc:modules/Set-AccountSecret.ps1__
+#__inc:modules/Get-MountSecretName.ps1__
+#__inc:modules/Set-AccountPassword.ps1__
+#__inc:modules/Remove-UnusedAccountSecret.ps1__
+#__inc:modules/Unprotect-MountSecret.ps1__
+#__inc:modules/Get-MountEntryLabel.ps1__
+#__inc:modules/Convert-FlatAccountToMountEntry.ps1__
+#__inc:modules/Import-LegacyFlatAccount.ps1__
+#__inc:modules/Import-LegacyPortableConfig.ps1__
+#__inc:modules/ConvertFrom-ShareLink.ps1__
+#__inc:modules/Get-FreeDriveLetters.ps1__
+#__inc:modules/Get-MountHostPart.ps1__
+#__inc:modules/Get-MountPathSegments.ps1__
+#__inc:modules/Get-MountIdentity.ps1__
+#__inc:modules/Test-SharedServerIdentity.ps1__
+#__inc:modules/Get-MountLogin.ps1__
+#__inc:modules/Get-MountKey.ps1__
+#__inc:modules/Build-Unc.ps1__
+#__inc:modules/Get-MP2KeyNames.ps1__
+#__inc:modules/Set-MP2LabelExactExact.ps1__
+#__inc:modules/Test-MP2LabelApplied.ps1__
+#__inc:modules/Remove-MP2KeysetExact.ps1__
+
+# Looks up a configured mount by its Id, or $null if it is gone.
+function Get-MountEntry([string]$Id) {
+	foreach ($e in $State.Mounts) { if ($e.Id -eq $Id) { return $e } }
+	return $null
+}
+
+# ================================================================
+# ---------- Config I/O ----------
+function Save-Config {
+	if ($IsInstalled) {
+		$base = Get-RegBase
+		if (-not (Test-Path -LiteralPath $base)) { New-Item -Path $base -Force | Out-Null }
+		New-ItemProperty -LiteralPath $base -Name 'IntervalS' -Value ([int]$State.IntervalS) -PropertyType DWord -Force | Out-Null
+		New-ItemProperty -LiteralPath $base -Name 'LangPref' -Value ([string]$State.LangPref) -PropertyType String -Force | Out-Null
+		Write-MountEntriesToRegistry -Entries @($State.Mounts)
+		return
+	}
+	# Depth 4: at the default depth the entries inside Mounts would be written as
+	# type names instead of objects.
+	$State | ConvertTo-Json -Depth 4 | Set-Content -Path $PortJson -Encoding UTF8
+}
+function Load-Config {
+	if ($IsInstalled) {
+		# Before anything is read, so the account of an older copy is part of the list
+		# this reads and not something found later.
+		try { Import-LegacyFlatAccount } catch {}
+		$base = Get-RegBase
+		if (Test-Path -LiteralPath $base) {
+			try {
+				$p = Get-ItemProperty -LiteralPath $base -ErrorAction Stop
+				$have = $p.PSObject.Properties.Name
+				if ($have -contains 'IntervalS') { try { $State.IntervalS = [int]$p.IntervalS } catch {} }
+				if ($have -contains 'LangPref') { $State.LangPref = [string]$p.LangPref }
+			} catch {}
+		}
+		$State.Mounts = @(Read-MountEntriesFromRegistry)
+		return
+	}
+	# No configuration of our own yet: whatever a copy up to 1.2.2 left in this
+	# folder is taken over, and Save-Config puts it into the file this version
+	# reads. With nothing to take over it writes the defaults, as a first start.
+	if (-not (Test-Path $PortJson)) {
+		try { [void](Import-LegacyPortableConfig -Path $LegacyPortJson) } catch {}
+		Save-Config
+		return
+	}
+	$raw = $null
+	try { $raw = Get-Content -Raw -Path $PortJson -Encoding UTF8 | ConvertFrom-Json } catch { $raw = $null }
+	# An unreadable file keeps its content: overwriting it with defaults would
+	# throw away every configured mount because of one stray character.
+	if ($null -eq $raw) { Show-WarnT 'message.config_unreadable' @{ path = $PortJson }; return }
+	$have = $raw.PSObject.Properties.Name
+	if ($have -contains 'IntervalS') { try { $State.IntervalS = [int]$raw.IntervalS } catch {} }
+	if ($have -contains 'LangPref') { $State.LangPref = [string]$raw.LangPref }
+	$entries = @()
+	if ($have -contains 'Mounts') { foreach ($m in @($raw.Mounts)) { if ($m) { $entries += (ConvertTo-MountEntry $m) } } }
+	$State.Mounts = $entries
+}
+
+# ================================================================
+#	Server favicon (used as the drive icon)
+# ================================================================
+#__inc:modules/New-BasicAuthHeader.ps1__
+#__inc:modules/New-HttpGetRequest.ps1__
+#__inc:modules/Get-HttpImage.ps1__
+#__inc:modules/Get-NcServerStatus.ps1__
+#__inc:modules/Get-FavIconFilePath.ps1__
+#__inc:modules/Save-IconFromBitmap.ps1__
+#__inc:modules/Fetch-ServerFavicon.ps1__
+#__inc:modules/Fetch-UserAvatar.ps1__
+
+# ================================================================
+#	Explorer branding (MountPoints2 label, drive icon HKCU)
+# ================================================================
+#__inc:modules/Set-DriveIconHKCU.ps1__
+#__inc:modules/Remove-DriveIconHKCU.ps1__
+#__inc:modules/Test-DriveIconApplied.ps1__
+#__inc:modules/Apply-WebDavBranding.ps1__
+#__inc:modules/Refresh-ShellIcons.ps1__
+#__inc:modules/Refresh-ExplorerDriveRemoval.ps1__
+#__inc:modules/Ensure-BrandingTick.ps1__
+
+# ================================================================
+#	Mapping / unmapping / drive-state checks
+# ================================================================
+#__inc:modules/Test-ValidDrive.ps1__
+#__inc:modules/Test-DriveMatchesDesired.ps1__
+#__inc:modules/Test-DriveAccessible.ps1__
+#__inc:modules/Get-NcServerStatusCached.ps1__
+#__inc:modules/Get-MountStatus.ps1__
+#__inc:modules/Get-MountStatusText.ps1__
+#__inc:modules/Get-TrayStatusText.ps1__
+#__inc:modules/Get-MapFailureStatus.ps1__
+#__inc:modules/New-WebDavMapSecure.ps1__
+#__inc:modules/Unmap-DriveIfOurs.ps1__
+#__inc:modules/Wait-DriveFullyUnmapped.ps1__
+#__inc:modules/Get-MountRuntime.ps1__
+#__inc:modules/Read-ShareInfoName.ps1__
+#__inc:modules/Test-ShareAccess.ps1__
+#__inc:modules/Test-SharePage.ps1__
+#__inc:modules/Show-PublicWebDavUnavailable.ps1__
+#__inc:modules/Show-SharePasswordPrompt.ps1__
+#__inc:modules/Prompt-Passphrase.ps1__
+#__inc:modules/Initialize-DriveLetterPicker.ps1__
+#__inc:modules/Update-DriveLetterPicker.ps1__
+#__inc:modules/Register-TrayHoverTip.ps1__
+#__inc:modules/Set-TrayTipText.ps1__
+#__inc:modules/Unregister-TrayHoverTip.ps1__
+#__inc:modules/Show-AddShareDialog.ps1__
+#__inc:modules/Show-EditMountDialog.ps1__
+#__inc:modules/Ensure-MountPassword.ps1__
+#__inc:modules/Map-MountEntry.ps1__
+#__inc:modules/Connect-MountEntry.ps1__
+#__inc:modules/Unmap-AllMounts.ps1__
+
+# Brings every configured mount to the state its entry asks for and returns a
+# result per entry, so the tray layer can render each mount without repeating the
+# work. A single entry never aborts the run: unrelated mounts have no reason to
+# suffer from one unreachable server.
+function Sync-Mounts {
+	[CmdletBinding()] param( [switch]$AskForPassword )
+	$results = @()
+	foreach ($entry in @($State.Mounts)) {
+		if (-not $entry) { continue }
+		$ok = $false
+		$attempted = $false
+		[int]$rc = 0
+		$spec = $null
+		try { $spec = New-MountSpecFromEntry $entry } catch {}
+		# Asking the server before the drive is not only tidier, it is cheaper: a
+		# host that does not answer explains every mount on it, and a map attempt
+		# against it costs a full timeout per mount instead of one status request.
+		# The drive is asked, not told: a mount that is up has to be able to say so,
+		# or every poll ends up rebuilding what is already there.
+		$status = if ($spec) { Get-MountStatus -Spec $spec -Enabled ([bool]$entry.Enabled) } else { 'invalid_drive' }
+		if (-not $entry.Enabled) {
+			# Disabled means "not mapped by us", not "not ours": no -Force, so a
+			# letter that meanwhile belongs to someone else is left alone. The claim
+			# goes with it, so another instance may take the mount over.
+			if ($spec) {
+				try { Unmap-DriveIfOurs -Spec $spec } catch {}
+				try { Remove-MapMutex -Spec $spec } catch {}; try { Remove-DriveGuard -Drive $spec.Drive } catch {}
+			}
+		} elseif ($status -in @('offline', 'maintenance')) {
+			# Same answer NcDavTray gives: the drive goes with the server. A WebDAV
+			# letter pointing at nothing hangs every Explorer window that touches it,
+			# and the next poll maps it again once the server is back.
+			try { Unmap-DriveIfOurs -Spec $spec -Force -RemoveProfile } catch {}
+			# The password is still worth asking for where the user asked for the
+			# connection: it is what lets a later poll bring the mount up by itself
+			# once the server is back, and a poll tick may not put a box on screen.
+			if ($AskForPassword) { try { [void](Ensure-MountPassword -Entry $entry) } catch {} }
+		} elseif ($status -eq 'online') {
+			# The letter is connected to this target and reads. There is nothing to
+			# do to it, and doing it anyway would take a working mount down and put
+			# it back up while the tray reported the round trip as a status change.
+			# The claims are renewed because a mount left over from an earlier run is
+			# found here, not mapped here, and would otherwise be held by nobody.
+			$ok = $true
+			try { [void](Ensure-DriveGuard -Drive $spec.Drive) } catch {}
+			try { [void](Ensure-MapMutex $spec) } catch {}
+			try { Ensure-BrandingTick $spec } catch {}
+		} elseif ($status -ne 'invalid_drive') {
+			# Only where the user asked for the connection: the modal prompt would
+			# otherwise pop up out of a poll tick, once per mount, unprovoked. Where it
+			# may not ask, an answer already given still counts and a missing one is the
+			# end of it: Map-MountEntry stops at a password it does not have, so the
+			# connect could only fail, and the mount would go pending on every tick for
+			# it. A prompt that was cancelled is left where the user left it.
+			$havePass = $null -ne (Get-MountRuntime $entry.Id).Pass
+			if ($AskForPassword) { try { $havePass = [bool](Ensure-MountPassword -Entry $entry) } catch { $havePass = $false } }
+			if ($havePass) {
+				$attempted = $true
+				Set-MountTrayStatus $entry 'pending'
+				try { $ok = Connect-MountEntry -Entry $entry -LastError ([ref]$rc) } catch { $ok = $false }
+			}
+			# The server has already answered for this tick, so the drive is all that
+			# is left to judge -- and the connect just did that.
+			$status = Get-MountStatus -Spec $spec -Connected $ok -SkipServerCheck
+			if ($attempted -and -not $ok) { $status = Get-MapFailureStatus $rc }
+		}
+		# Attempted says whether the mount got as far as the connect. Where it did
+		# not, the reason is already known to the user -- a cancelled password
+		# prompt, a share the server no longer has -- and needs no second word.
+		$results += [pscustomobject]@{ Id = $entry.Id; Connected = $ok; Status = $status; LastError = $rc; Attempted = $attempted }
+	}
+	return $results
+}
+
+# ================================================================
+#	Tray
+# ================================================================
+#__inc:modules/New-StatusIcon.ps1__
+#__inc:modules/New-MountStatusIcon.ps1__
+
+# Short human name of a mount, for menus and tooltips. The token is deliberately
+# not part of it: it is the share's address, and the tray is a public surface.
+function Get-MountTrayText([psobject]$Entry, [string]$Status, [int]$Rc = 0) {
+	return (Get-TrayStatusText -Name (Get-MountDisplayName $Entry) -Drive ([string]$Entry.Drive) -Status $Status -Rc $Rc)
+}
+# Paints one mount's icon and tooltip. Update-Trays does it for the whole list
+# once a poll is through; a connect attempt does it for itself before it starts,
+# so the tray says what it is doing while it does it and not only afterwards.
+function Set-MountTrayStatus([psobject]$Entry, [string]$Status, [int]$Rc = 0) {
+	if (-not $Entry -or -not $script:Trays.ContainsKey($Entry.Id)) { return }
+	$rec = $script:Trays[$Entry.Id]
+	$rec.Status = $Status
+	$rec.Rc = $Rc
+	$old = $rec.Notify.Icon
+	$rec.Notify.Icon = New-MountStatusIcon -Entry $Entry -Status $Status
+	if ($old) { try { $old.Dispose() } catch {} }
+	Set-TrayTipText $rec.Notify (Get-MountTrayText $Entry $Status $Rc)
+}
+
+#__inc:modules/Update-TrayTips.ps1__
+
+#__inc:modules/Show-CustomBalloon.ps1__
+#__inc:modules/Show-MountBalloon.ps1__
+#__inc:modules/Show-ManagerBalloon.ps1__
+
+# ---------- Tray actions ----------
+#__inc:modules/Show-CredentialConflict.ps1__
+#__inc:modules/Show-MountFailure.ps1__
+
+# Connect and disconnect write Enabled, because a mount the user switched off has
+# to stay off across the next poll and across a restart. Without that the timer
+# would simply map it again a few seconds later.
+function Connect-MountById([string]$Id) {
+	$entry = Get-MountEntry $Id
+	if (-not $entry) { return }
+	if (-not $entry.Enabled) { $entry.Enabled = $true; Save-Config }
+	# The password prompt is a modal dialog, and the poll keeps ticking behind it.
+	$script:MountBusy = $true
+	try {
+		if (-not (Ensure-MountPassword -Entry $entry)) { return }
+		[int]$rc = 0
+		Set-MountTrayStatus $entry 'pending'
+		$ok = Connect-MountEntry -Entry $entry -LastError ([ref]$rc)
+		if (-not $ok) {
+			# A password the server took but Windows could not use is worth asking for
+			# again; anything else would keep re-trying the same rejected string.
+			if ($rc -in @(5, 1244, 1326)) { (Get-MountRuntime $Id).Pass = $null }
+			Show-MountFailure -Entry $entry -Code $rc
+		}
+		# The result goes along, or Update-Trays would ask the drive a second time and
+		# get back a plain "failed" for what the error code just explained.
+		$status = if ($ok) { 'online' } else { Get-MapFailureStatus $rc }
+		Update-Trays @([pscustomobject]@{ Id = $entry.Id; Connected = $ok; Status = $status; LastError = $rc; Attempted = $true })
+	} finally { $script:MountBusy = $false }
+}
+function Disconnect-MountById([string]$Id) {
+	$entry = Get-MountEntry $Id
+	if (-not $entry) { return }
+	if ($entry.Enabled) { $entry.Enabled = $false; Save-Config }
+	$spec = New-MountSpecFromEntry $entry
+	# Telling the shell a drive has gone pumps the message loop, so a poll tick can
+	# start here and map the letter again before this one has finished taking it
+	# down. The entry is already disabled by then, but its claims are not released.
+	$script:MountBusy = $true
+	try {
+		try { Unmap-DriveIfOurs -Spec $spec -Force -RemoveProfile } catch {}
+		try { Remove-MapMutex -Spec $spec } catch {}
+		try { Remove-DriveGuard -Drive $spec.Drive } catch {}
+	} finally { $script:MountBusy = $false }
+	Update-Trays
+}
+function Open-MountInExplorer([string]$Id) {
+	$entry = Get-MountEntry $Id
+	if (-not $entry) { return }
+	if (-not (Test-DriveAccessible (New-MountSpecFromEntry $entry))) { return }
+	try { Start-Process -FilePath 'explorer.exe' -ArgumentList $entry.Drive } catch {}
+}
+# The letters the configuration has already spoken for: two mounts on one letter
+# is a fight neither of them wins.
+function Get-ReservedDrives([string]$ExceptId = '') {
+	$used = @()
+	foreach ($e in @($State.Mounts)) { if ($e -and $e.Id -ne $ExceptId) { $used += [string]$e.Drive } }
+	return $used
+}
+# Windows keeps one set of credentials per server identity and offers exactly two
+# of them per host. With both already connected -- typically the account mapping
+# and one other share -- a mount that needs a place of its own cannot come up,
+# whatever it is called and whichever letter it gets. Saying so now beats an error
+# 1219 afterwards, and it is still worth adding: the entry stays and connects once
+# a place frees up. $true means carry on.
+# A mount that presents the same login as a connection already up needs no place of
+# its own -- it joins that one. A duplicate is exactly that case, and warning about
+# it would be warning about nothing.
+function Confirm-ServerIdentity([psobject]$Entry) {
+	$idents = Get-UsedServerIdentities -Server $Entry.Server
+	if (-not ($idents.Plain -and $idents.ExplicitPort)) { return $true }
+	$others = @(@($State.Mounts) | Where-Object { $_ })
+	if (Test-SharedServerIdentity -Entry $Entry -Others $others -HeldBy $idents.Drives) { return $true }
+	return ((Show-CustomMsgBoxT 'message.confirm_server_identities_exhausted' @{ server = $Entry.Server } 'YesNo' 'Warning') -eq [System.Windows.Forms.DialogResult]::Yes)
+}
+function Add-ShareFromLink {
+	$used = @(Get-ReservedDrives)
+	$free = @(Get-FreeDriveLetters -Exclude $used)
+	if ($free.Count -eq 0) { Show-WarnT 'message.no_free_drive_letter'; return }
+	$entry = Show-AddShareDialog -Reserved $used
+	if (-not $entry) { return }
+	if (-not (Confirm-ServerIdentity $entry)) { return }
+	$State.Mounts = @(@($State.Mounts) + $entry)
+	Save-Config
+	Connect-MountById $entry.Id
+}
+# A new account is put in front of the same page an existing one is edited on,
+# opened on an entry that is not in the list yet -- see Set-AccountEditorContext,
+# where the save is what puts it there. A window closed without saving leaves
+# nothing behind.
+function Add-Account {
+	$used = @(Get-ReservedDrives)
+	if (@(Get-FreeDriveLetters -Exclude $used).Count -eq 0) { Show-WarnT 'message.no_free_drive_letter'; return }
+	# The mount identity of an account is the plain host: \\server@ssl\..., which is
+	# what 1.x mapped and what an account taken over from a 1.x installation keeps.
+	# The second identity belongs to a share that has to sit next to one of these.
+	$entry = New-MountEntry -Kind 'account' -ExplicitPort $false
+	[void](Show-AccountSettingsDialog -Entry $entry)
+}
+function Connect-AllMounts {
+	# Held across the failure boxes as well: they are modal, and until the last of
+	# them is away this run has not finished with the mounts it is reporting on.
+	$script:MountBusy = $true
+	try {
+		$results = @()
+		try { $results = Sync-Mounts -AskForPassword } catch {}
+		Update-Trays $results
+		# Connecting on request has to say what came of it, the same as connecting a
+		# single mount does. The poll tick stays silent: it runs unasked, and a modal
+		# box out of a timer is not an answer to anything.
+		foreach ($r in @($results)) {
+			if (-not $r -or $r.Connected -or -not $r.Attempted) { continue }
+			$entry = Get-MountEntry $r.Id
+			if ($entry) { Show-MountFailure -Entry $entry -Code $r.LastError }
+		}
+	} finally { $script:MountBusy = $false }
+}
+# The edited entry replaces the old one under the same Id, so the tray icon and
+# the password already given stay with the mount. Where the edit changed what is
+# mapped and not only how it is called, the old mapping has to go first: once the
+# entry is replaced, nothing knows the letter and the path it used to hold.
+function Update-ShareById([string]$Id) {
+	$entry = Get-MountEntry $Id
+	if (-not $entry) { return }
+	# An account is edited on the account settings page, which saves and remaps
+	# through the editor context, so there is nothing left to do here.
+	if ($entry.Kind -eq 'account') { [void](Show-AccountSettingsDialog -Entry $entry); return }
+	$edited = Show-EditMountDialog -Entry $entry -Reserved @(Get-ReservedDrives -ExceptId $Id)
+	if (-not $edited) { return }
+	$oldSpec = New-MountSpecFromEntry $entry
+	# The name goes into the mount key nowhere, but Explorer reads it when the drive
+	# is connected: a renamed mount keeps showing the old name until it is mapped
+	# again. So a changed name remaps as well.
+	if (((Get-MountKey $oldSpec) -ne (Get-MountKey (New-MountSpecFromEntry $edited))) -or ($entry.Label -ne $edited.Label)) {
+		try { Unmap-DriveIfOurs -Spec $oldSpec -Force -RemoveProfile } catch {}
+		try { Refresh-ExplorerDriveRemoval $oldSpec.Drive } catch {}
+		try { Remove-MapMutex -Spec $oldSpec } catch {}
+		try { Remove-DriveGuard -Drive $oldSpec.Drive } catch {}
+	}
+	$list = @()
+	foreach ($e in @($State.Mounts)) { if ($e) { if ($e.Id -eq $Id) { $list += $edited } else { $list += $e } } }
+	$State.Mounts = $list
+	Save-Config
+	if ($edited.Enabled) { Connect-MountById $Id } else { Update-Trays }
+}
+function Remove-ShareById([string]$Id) {
+	$entry = Get-MountEntry $Id
+	if (-not $entry) { return }
+	if ((Show-CustomMsgBoxT 'message.confirm_remove_share' @{ share = (Get-MountDisplayName $entry) } 'YesNo' 'Question') -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+	$spec = New-MountSpecFromEntry $entry
+	try { Unmap-DriveIfOurs -Spec $spec -Force -RemoveProfile } catch {}
+	try { Refresh-ExplorerDriveRemoval $spec.Drive } catch {}
+	try { Remove-MapMutex -Spec $spec } catch {}
+	try { Remove-DriveGuard -Drive $spec.Drive } catch {}
+	Remove-MountTray $Id
+	$list = @()
+	foreach ($e in @($State.Mounts)) { if ($e -and $e.Id -ne $Id) { $list += $e } }
+	$State.Mounts = $list
+	if ($script:Runtime.ContainsKey($Id)) { [void]$script:Runtime.Remove($Id) }
+	Save-Config
+	# A stored password outlives the mount it was given for, so the last mount that
+	# used it has to say goodbye. For a share that is the only way it ever goes.
+	Remove-UnusedAccountSecret -Server $entry.Server -User (Get-MountSecretName $entry)
+	Update-Trays
+}
+# Removing a mount disposes its tray icon, and with it the menu the click came out
+# of. Letting the message loop turn once first lets the dropdown close on its own
+# before the ground is pulled out from under it.
+function Request-ShareRemoval([string]$Id) {
+	$script:PendingRemoveId = $Id
+	$t = New-Object System.Windows.Forms.Timer
+	$t.Interval = 1
+	$t.Add_Tick({ $this.Stop(); $this.Dispose(); Remove-ShareById $script:PendingRemoveId })
+	$t.Start()
+}
+
+# A clone is a mount in its own right from the first moment: its own Id and its
+# own drive letter, everything else the same as the original, including the name.
+# Nothing is copied that would then live a separate life -- the password is not
+# the mount's but the server/user pair's, so both mounts are served by the one
+# value and a password changed on either is changed for both.
+function Copy-ShareById([string]$Id) {
+	$src = Get-MountEntry $Id
+	if (-not $src) { return }
+	$used = @(Get-ReservedDrives)
+	if (@(Get-FreeDriveLetters -Exclude $used).Count -eq 0) { Show-WarnT 'message.no_free_drive_letter'; return }
+	$copy = New-MountEntry -Server $src.Server -Kind $src.Kind -User $src.User -Token $src.Token `
+		-SubPath $src.SubPath -Drive '' -Label ([string]$src.Label) `
+		-ExplicitPort:([bool]$src.ExplicitPort) -Enabled:$true
+	$edited = Show-EditMountDialog -Entry $copy -Reserved $used
+	if (-not $edited) { return }
+	if (-not (Confirm-ServerIdentity $edited)) { return }
+	$State.Mounts = @(@($State.Mounts) + $edited)
+	Save-Config
+	Connect-MountById $edited.Id
+}
+#__inc:modules/Update-ListViewColumns.ps1__
+#__inc:modules/Update-ShareListView.ps1__
+#__inc:modules/Show-AddMenu.ps1__
+
+# ================================================================
+#	Settings dialog
+# ================================================================
+# The window frame only: what goes on the tab pages lives in the renderers.
+function Show-SettingsDialog {
+	# Guard: prevent multiple settings windows
+	if ($script:IsSettingsOpen -and $script:SettingsForm -and (-not $script:SettingsForm.IsDisposed)) {
+		try { $script:SettingsForm.WindowState = [System.Windows.Forms.FormWindowState]::Normal; $script:SettingsForm.Activate(); $script:SettingsForm.BringToFront() } catch {}
+		return [System.Windows.Forms.DialogResult]::Cancel
+	}
+	# global tooltip (single instance, reused everywhere)
+	$script:Tip = New-Object System.Windows.Forms.ToolTip
+	$script:Tip.InitialDelay = 300 # delay before first show (ms)
+	$script:Tip.ReshowDelay = 100 # delay for subsequent shows (ms)
+	$script:Tip.ShowAlways = $true # also show for disabled controls
+	# Mark as open early
+	$script:IsSettingsOpen = $true
+	# Create host form (chrome only)
+	$f = $script:HostForm = New-Object System.Windows.Forms.Form; Apply-BrandIconToForm $f; Hook-FormDpi $f
+	$f.Text = (T 'title.settings_dialog' @{ app = $AppName }); $f.ShowInTaskbar = $false; $f.TopMost = $true; $f.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+	$f.MaximizeBox = $false; $f.MinimizeBox = $false
+	$f.Width = 680
+	$f.Height = 520
+	$f.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+	# --- TabControl host (chrome stays on $f) ---
+	$script:Tabs = New-Object System.Windows.Forms.TabControl
+	$script:Tabs.Left = 8; $script:Tabs.Top = 8; $script:Tabs.Width = $f.ClientSize.Width - 16; $script:Tabs.Height = $f.ClientSize.Height - 16; $script:Tabs.Anchor = 'Top, Left, Right, Bottom'
+	$script:Tabs.Appearance = 'Buttons' # 'Normal' | 'Buttons' | 'FlatButtons'
+	$script:Tabs.HotTrack = $true; $script:Tabs.TabStop = $false # keep focus inside the active TabPage
+	# Tab: Shares
+	$tabShares = $script:TabShares = New-Object System.Windows.Forms.TabPage; $tabShares.Text = (T 'tab.shares'); $tabShares.Padding = '6, 6, 6, 6'
+	# Tab: WebClient Tuning
+	$tabTuning = $script:TabTuning = New-Object System.Windows.Forms.TabPage; $tabTuning.Text = (T 'tab.webclient_tuning'); $tabTuning.Padding = '6, 6, 6, 6'
+	# Tab: WebDAV cache cleanup (on-demand admin cleaner)
+	$tabCache = $script:TabCache = New-Object System.Windows.Forms.TabPage; $tabCache.Text = (T 'tab.webdav_cache'); $tabCache.Padding = '6, 6, 6, 6'
+	[void]$script:Tabs.TabPages.Add($tabShares); [void]$script:Tabs.TabPages.Add($tabTuning); [void]$script:Tabs.TabPages.Add($tabCache)
+	$f.Controls.Add($script:Tabs)
+	# Render content into each tab page (container ! = HostForm)
+	Render-SharesTab -HostTab $tabShares; Render-WebClientTuningTab -HostTab $tabTuning; Render-WebDavCacheTab -HostTab $tabCache
+	# A window that cannot be resized has to be built around what is in it, and how
+	# much room the tab strip and the page insets leave is only known once it is
+	# there. Load is early enough: the sizes are settled and nothing has been drawn.
+	# A button that does not fit is a button the user cannot reach.
+	$f.add_Load({
+			$panel = $script:ShareButtonPanel
+			if (-not $panel -or $panel.IsDisposed) { return }
+			$short = $panel.PreferredSize.Height - $panel.Height
+			if ($short -gt 0) { $this.Height += $short }
+		})
+	# Registered after the handler above, so what gets centred is the window the
+	# user ends up with and not the one it was built as.
+	Hook-FormScreen $f
+	# The list is what makes this window slow -- a status request per server, a
+	# read per drive -- and none of it may happen before there is something to
+	# look at. Shown is after the first paint, Refresh makes sure that paint has
+	# actually landed, and the wait cursor says the window is working. A window
+	# that looks like it is doing nothing gets clicked again.
+	$f.add_Shown({
+			$this.UseWaitCursor = $true
+			$this.Refresh()
+			try { Update-ShareListView $script:ShareListView } finally { $this.UseWaitCursor = $false }
+		})
+	# Track the window and show
+	$script:SettingsForm = $f
+	$dlg = $f.ShowDialog()
+	# Reset open flag on close
+	$script:IsSettingsOpen = $false
+	$script:SettingsForm = $null; $script:HostForm = $null
+	try { $f.Dispose() } catch {}
+	return $dlg
+}
+#__inc:modules/Install-App.ps1__
+#__inc:modules/Export-AppConfig.ps1__
+#__inc:modules/Import-AppConfig.ps1__
+#__inc:modules/Export-AppToPortable.ps1__
+#__inc:modules/Uninstall-App.ps1__
+#__inc:modules/Render-SharesTab.ps1__
+#__inc:modules/Invoke-WebClientWriteBroker.ps1__
+#__inc:modules/Get-ServerScope.ps1__
+#__inc:modules/Get-TuningServer.ps1__
+#__inc:modules/Unmap-OwnDrives.ps1__
+#__inc:modules/Set-TrayServiceDeactivated.ps1__
+#__inc:modules/Invoke-WebClientServiceAction.ps1__
+#__inc:modules/Sync-WebClientDeactivatedFlag.ps1__
+#__inc:modules/Get-WebClientTriggerInfoText.ps1__
+#__inc:modules/Render-WebClientTuningTab.ps1__
+#__inc:modules/Format-CacheBytes.ps1__
+#__inc:modules/Render-WebDavCacheTab.ps1__
+# NcDavTray's settings page, opened here on an account of the managed list.
+#__inc:modules/Encode-OcsPath.ps1__
+#__inc:modules/Invoke-NcOcsFolderTreeRaw.ps1__
+#__inc:modules/Invoke-NcOcsFolderTree.ps1__
+#__inc:modules/Test-NcFolderExists.ps1__
+#__inc:modules/Get-NcFolderChildren.ps1__
+#__inc:modules/Join-SubPath.ps1__
+#__inc:modules/Show-NcFolderPicker.ps1__
+#__inc:modules/Render-BasicSettingsTab.ps1__
+#__inc:modules/Show-AccountSettingsWindow.ps1__
+#__inc:modules/Set-AccountEditorContext.ps1__
+#__inc:modules/Show-AccountSettingsDialog.ps1__
+
+# ---------- Tray icons ----------
+function New-MountTray([psobject]$Entry) {
+	$ni = New-Object System.Windows.Forms.NotifyIcon
+	$menu = New-Object System.Windows.Forms.ContextMenuStrip
+	$menu.Tag = $Entry.Id
+	$miConn = $menu.Items.Add((T 'menu.connect')); $miConn.Tag = $Entry.Id; $miConn.Add_Click({ Connect-MountById $this.Tag })
+	$miDisc = $menu.Items.Add((T 'menu.disconnect')); $miDisc.Tag = $Entry.Id; $miDisc.Add_Click({ Disconnect-MountById $this.Tag })
+	$miOpen = $menu.Items.Add((T 'menu.open_explorer')); $miOpen.Tag = $Entry.Id; $miOpen.Add_Click({ Open-MountInExplorer $this.Tag })
+	# The settings of the mount this icon stands for, reachable from the icon itself
+	# the way NcDavTray offers them for its drive. For an account that is where its
+	# password is set, and a clone of an account is an account: it is listed nowhere
+	# else, so leaving it to the settings window would leave it out of reach.
+	$miSett = $menu.Items.Add((T 'menu.settings')); $miSett.Tag = $Entry.Id; $miSett.Add_Click({ Update-ShareById ([string]$this.Tag) })
+	[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+	# Not Exit: this menu belongs to one mount, and what it may end is that mount.
+	# Ending the program is a decision about the whole family and lives on the
+	# application icon.
+	$miRemove = $menu.Items.Add((T 'button.remove')); $miRemove.Tag = $Entry.Id; $miRemove.Add_Click({ Request-ShareRemoval ([string]$this.Tag) })
+	# What is offerable comes from the last poll rather than from asking the drive
+	# here: reading a WebDAV drive takes as long as the server needs, and this runs
+	# on the UI thread while the menu is coming up. A menu that keeps the user
+	# waiting invites a second right click, and that one opens a second dropdown
+	# while the first is left standing with nothing to close it.
+	$menu.Add_Opening({
+			try {
+				$rec = $script:Trays[$this.Tag]
+				$live = [bool]($rec -and $rec.Status -eq 'online')
+				# A mount that is not up has nothing to disconnect, but it can still be
+				# switched off -- and that is the only way to stop the poll retrying one
+				# that never comes up. Off, there is nothing left for the item to do.
+				$entry = Get-MountEntry ([string]$this.Tag)
+				$enabled = [bool]($entry -and $entry.Enabled)
+				$this.Items[0].Enabled = -not $live
+				$this.Items[1].Enabled = $live -or $enabled
+				$this.Items[2].Enabled = $live
+				# Relabel on open, so a language change reaches these menus too
+				$this.Items[0].Text = (T 'menu.connect')
+				$this.Items[1].Text = if ($enabled -and -not $live) { T 'menu.disable' } else { T 'menu.disconnect' }
+				$this.Items[2].Text = (T 'menu.open_explorer')
+				$this.Items[3].Text = (T 'menu.settings')
+				$this.Items[5].Text = (T 'button.remove')
+			} catch {}
+		})
+	$ni.ContextMenuStrip = $menu
+	$ni.Add_MouseClick({
+			param($s, $e)
+			if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Show-MountBalloon ([string]$s.Tag) }
+		})
+	$ni.Add_MouseDoubleClick({
+			# The first click of a double click has already put the balloon up, and it
+			# has nothing left to say next to the window Explorer is about to open.
+			try { if ($script:BalloonForm -and -not $script:BalloonForm.IsDisposed) { $script:BalloonForm.Close() } } catch {}
+			Open-MountInExplorer $this.Tag
+		})
+	$ni.Tag = $Entry.Id
+	Register-TrayHoverTip $ni
+	return [pscustomobject]@{ Id = $Entry.Id; Notify = $ni; Menu = $menu; Status = 'failed'; Rc = 0 }
+}
+function Remove-MountTray([string]$Id) {
+	if (-not $script:Trays.ContainsKey($Id)) { return }
+	$rec = $script:Trays[$Id]
+	try { $rec.Notify.Visible = $false } catch {}
+	try { if ($rec.Notify.Icon) { $rec.Notify.Icon.Dispose() } } catch {}
+	try { Unregister-TrayHoverTip $rec.Notify } catch {}
+	try { $rec.Notify.Dispose() } catch {}
+	try { $rec.Menu.Dispose() } catch {}
+	$script:Trays.Remove($Id)
+}
+# Brings the tray in line with the configuration: one icon per configured mount,
+# none for anything else. Results is what Sync-Mounts returned; where an entry is
+# missing from it the drive is asked directly, so the function also works when
+# called after a single action.
+function Update-Trays([psobject[]]$Results) {
+	$byId = @{}
+	foreach ($r in @($Results)) { if ($r) { $byId[$r.Id] = $r } }
+	$wanted = @{}
+	foreach ($entry in @($State.Mounts)) {
+		# A disabled mount keeps its icon and shows red. NcDavTray does the same for
+		# its own drive after Disconnect: the mount is configured, it is only down,
+		# and an icon that vanishes reads as a mount the program has lost.
+		if (-not $entry) { continue }
+		$wanted[$entry.Id] = $true
+		if (-not $script:Trays.ContainsKey($entry.Id)) { $script:Trays[$entry.Id] = New-MountTray $entry }
+		$rec = $script:Trays[$entry.Id]
+		$status = if ($byId.ContainsKey($entry.Id)) { [string]$byId[$entry.Id].Status } else { Get-MountStatus -Spec (New-MountSpecFromEntry $entry) }
+		$lastRc = if ($byId.ContainsKey($entry.Id)) { [int]$byId[$entry.Id].LastError } else { 0 }
+		# The menus and balloons read this instead of asking the drive themselves
+		Set-MountTrayStatus $entry $status $lastRc
+		$rec.Notify.Visible = $true
+	}
+	# Snapshot the keys: Remove-MountTray edits the table
+	foreach ($id in @($script:Trays.Keys)) { if (-not $wanted.ContainsKey($id)) { Remove-MountTray $id } }
+}
+# The application icon is always there, even with nothing configured -- otherwise
+# an empty tray would leave no way to reach the program at all.
+function New-ManagerTray {
+	$ni = New-Object System.Windows.Forms.NotifyIcon
+	Ensure-AppBrandIcons
+	if ($script:AppIcon) { $ni.Icon = $script:AppIcon }
+	$menu = New-Object System.Windows.Forms.ContextMenuStrip
+	# Which of the two copies this is, said where every menu of the program starts.
+	# It decides what the program may do with itself -- install, export, uninstall --
+	# and the colours are the ones the settings window uses for the same two words.
+	$miMode = New-Object System.Windows.Forms.ToolStripLabel
+	$miMode.Font = New-Object System.Drawing.Font($menu.Font, $UiFontStyleBold)
+	$miMode.ForeColor = if ($PortableMode) { [System.Drawing.Color]::ForestGreen } else { [System.Drawing.Color]::SteelBlue }
+	[void]$menu.Items.Add($miMode)
+	[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+	$miAdd = $menu.Items.Add((T 'menu.add_share_link')); $miAdd.Add_Click({ Add-ShareFromLink })
+	$miAccount = $menu.Items.Add((T 'menu.add_account')); $miAccount.Add_Click({ Add-Account })
+	# The settings live on the application icon alone: a mount's own menu can remove
+	# that very mount, and with it the menu the click came out of.
+	$miSettings = $menu.Items.Add((T 'menu.settings')); $miSettings.Add_Click({ [void](Show-SettingsDialog) })
+	$miAll = $menu.Items.Add((T 'menu.connect_all')); $miAll.Add_Click({ Connect-AllMounts })
+	[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+	# About belongs to the installation, not to a single drive, so it is here and not
+	# in a mount's menu.
+	$miAbout = $menu.Items.Add((T 'menu.about')); $miAbout.Add_Click({ Show-AboutDialog })
+	[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+	$miExit = $menu.Items.Add((T 'menu.exit')); $miExit.Add_Click({ Quit-App })
+	# Connecting needs something to work on: with nothing configured the entry would
+	# do nothing. The settings stay reachable either way -- that is where the first
+	# share is added. The labels are put on here rather than only at build time, so
+	# a language picked in the settings shows the next time the menu opens.
+	$menu.Add_Opening({
+			$has = @(@($State.Mounts) | Where-Object { $_ }).Count -gt 0
+			$this.Items[5].Enabled = $has
+			$this.Items[0].Text = if ($PortableMode) { (T 'mode.portable') } else { (T 'mode.installed') }
+			$this.Items[2].Text = (T 'menu.add_share_link')
+			$this.Items[3].Text = (T 'menu.add_account')
+			$this.Items[4].Text = (T 'menu.settings')
+			$this.Items[5].Text = (T 'menu.connect_all')
+			$this.Items[7].Text = (T 'menu.about')
+			$this.Items[9].Text = (T 'menu.exit')
+		})
+	$ni.ContextMenuStrip = $menu
+	$ni.Add_MouseClick({
+			param($s, $e)
+			if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Show-ManagerBalloon }
+		})
+	Register-TrayHoverTip $ni
+	Set-TrayTipText $ni (T 'tray.manager' @{ app = $AppName })
+	$ni.Visible = $true
+	return [pscustomobject]@{ Notify = $ni; Menu = $menu }
+}
+# An empty $Lang is "Auto". Nothing is rebuilt -- every menu puts its labels on
+# when it opens, and the tray tooltips are rewritten by the next poll.
+function Set-UiLanguage([string]$Lang) {
+	$State.LangPref = $Lang
+	Save-Config
+	Initialize-I18n $State.LangPref
+	Update-TrayTips
+}
+# Exit on the application icon takes every drive with it: the icon of a single
+# mount has no exit of its own.
+function Quit-App {
+	$script:Quitting = $true
+	try { if ($script:timer) { $script:timer.Stop() } } catch {}
+	Unmap-AllMounts
+	foreach ($id in @($script:Trays.Keys)) { Remove-MountTray $id }
+	[System.Windows.Forms.Application]::Exit()
+}
+
+# ================================================================
+#	Watchdog (separate process guard)
+# ================================================================
+#__inc:modules/Run-Watchdog.ps1__
+
+# ================================================================
+#	Installed instance control (stop / start)
+# ================================================================
+#__inc:modules/Get-RunningInstalledMain.ps1__
+#__inc:modules/Stop-InstalledInstance.ps1__
+#__inc:modules/Start-InstalledInstance.ps1__
+
+# ================================================================
+#	Startup
+# ================================================================
+# The language preference is part of the configuration, but the single-instance
+# check and Load-Config itself can already have something to say. So i18n comes up
+# first on the system language and is redone once the preference is known.
+Initialize-I18n
+# The cache agent is a worker, not a second copy of the program: it must not take
+# the single-instance lock and it never puts a tray icon up.
+if ($Action -eq 'CacheAgent') { CacheAgent -OwnerPid $OwnerPid -IntervalSeconds $IntervalSeconds; return }
+# The same goes for the watchdog, and it has to come before the lock as well: it
+# is the copy that has to still be there once this one is not.
+if ($Watchdog) { Run-Watchdog -OnOwnerGone { Unmap-AllMounts }; return }
+# What Installer.cmd asks for. Both run without a tray and without the lock: this
+# copy is here to write a folder, not to mount anything, and the instance it is
+# writing over is the one that has to go instead.
+if ($Action -eq 'Install') {
+	$script:FromInstaller = $true
+	# The script cannot be replaced under a copy that is running it, and the drives
+	# that copy holds would still be there afterwards with nothing behind them.
+	if (-not (Stop-InstalledInstance -TimeoutSec 12 -ForceOnTimeout)) { Write-Warning 'Some installed instance(s) did not exit in time; proceeding with installation anyway.' }
+	Install-App -FromInstaller
+	[void](Start-InstalledInstance)
+	return
+}
+if ($Action -eq 'ExportPortable') {
+	$script:FromInstaller = $true
+	Export-AppToPortable -Force
+	return
+}
+Ensure-SingleInstanceForConfig
+# Up to 1.2.2 the drive icon was cached beside the script. Nothing reads that
+# file any more, and it is taken away wherever it is still lying about.
+try { Remove-LegacyFavIcon } catch {}
+Load-Config
+Initialize-I18n
+# The passphrase question of a portable copy, before anything is mounted: an account
+# whose password is still locked away would come up as a red drive letter, and being
+# asked about it afterwards explains none of what was already seen going wrong.
+if (-not (Unlock-PortableSecretStore)) { exit }
+# The elevated cache agent outlives the window that started it and asks the
+# instance list whether anything is still there to serve.
+try { Register-Instance -Role 'Ui' -Tag 'manager' } catch {}
+
+$script:TrayManager = New-ManagerTray
+# Nothing appears in the notification area until the message loop runs, so the
+# first connect has to wait for it. Every mount asks its server before it is put
+# up, and on a slow or unreachable one that is seconds each -- done here, the
+# tray would stay empty for all of them with nothing to say why. The one tick
+# fires as soon as the loop is idle, which is right after the icon is out.
+# Asking for every share's password at startup is the price of never storing one.
+$script:startupTimer = New-Object System.Windows.Forms.Timer
+$script:startupTimer.Interval = 1
+$script:startupTimer.Add_Tick({ $this.Stop(); $this.Dispose(); Connect-AllMounts })
+$script:startupTimer.Start()
+
+# The poll keeps the mounts up but never asks for anything: a dialog out of a
+# timer tick would interrupt whatever the user is doing at that moment.
+$script:timer = New-Object System.Windows.Forms.Timer
+$script:timer.Interval = ([Math]::Max(5, [int]$State.IntervalS) * 1000)
+$script:timer.Add_Tick({
+		# Skipped, not queued: the tick is a poll, and the next one is fifteen
+		# seconds away. What is running has the drives in hand anyway.
+		if ($script:Quitting -or $script:MountBusy) { return }
+		$script:MountBusy = $true
+		try {
+			$results = @()
+			try { $results = Sync-Mounts } catch {}
+			try { Update-Trays $results } catch {}
+		} finally { $script:MountBusy = $false }
+	})
+$script:timer.Start()
+
+# The guard needs a way to tell whether this process is still there, and a named
+# mutex vanishes with it however it ends -- killed included, which a PID does not
+# survive being reused. One guard per process, so a restart never doubles them.
+$script:MainMutexName = "Local\{0}Main-{1}" -f $AppName, $PID
+try { $script:mainMutex = New-Object System.Threading.Mutex($true, $script:MainMutexName) } catch { $script:mainMutex = $null }
+$wdKey = "Local\{0}Watchdog-{1}" -f $AppName, $PID
+try {
+	[void][System.Threading.Mutex]::OpenExisting($wdKey)
+	# already running for this PID
+} catch {
+	$exe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+	$args = "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -STA -File `"$PSCommandPath`" -Watchdog -MainMutexName `"$script:MainMutexName`" -OwnerPid $PID"
+	Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory (Split-Path -Parent $PSCommandPath) -WindowStyle Hidden | Out-Null
+}
+
+$exitHandler = [System.EventHandler]{
+	try { [System.Windows.Forms.Application]::remove_ApplicationExit($exitHandler) } catch {}
+	try { [AppDomain]::CurrentDomain.remove_ProcessExit($exitHandler) } catch {}
+	try { if ($script:timer) { $script:timer.Stop(); $script:timer.Dispose() } } catch {}
+	# Unmap before the mutex goes: from that moment the watchdog would start doing
+	# the same work, on the same drives, from another process.
+	try { Unmap-AllMounts } catch {}
+	try { if ($script:mainMutex) { $script:mainMutex.ReleaseMutex() | Out-Null; $script:mainMutex.Dispose() } } catch {}
+	foreach ($id in @($script:Trays.Keys)) { try { Remove-MountTray $id } catch {} }
+	try { if ($script:TrayManager) { $script:TrayManager.Notify.Visible = $false; $script:TrayManager.Notify.Dispose(); $script:TrayManager.Menu.Dispose() } } catch {}
+	try { Remove-MapMutex } catch {}
+	try { Remove-DriveGuard } catch {}
+	try { Release-MutexSafe $script:cfgMutex } catch {}
+	try { if ($script:ServerFaviconBmp) { $script:ServerFaviconBmp.Dispose() } } catch {}
+	try { if ($script:AppIcon) { $script:AppIcon.Dispose() } } catch {}
+	# instance list last: leaving it can release the cache watcher, and the
+	# drives have to be gone before it starts deleting under them
+	try { Unregister-Instance -Role 'Ui' } catch {}
+}
+[System.Windows.Forms.Application]::add_ApplicationExit($exitHandler)
+[AppDomain]::CurrentDomain.add_ProcessExit($exitHandler)
+
+[System.Windows.Forms.Application]::Run()

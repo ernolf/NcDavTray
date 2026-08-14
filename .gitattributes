@@ -4,6 +4,7 @@
 *.psm1 text eol=crlf
 *.psd1 text eol=crlf
 *.cmd  text eol=crlf
+*.in   text eol=crlf
 
 *.png  binary
 *.ico  binary

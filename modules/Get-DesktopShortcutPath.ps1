@@ -1,0 +1,2 @@
+# Where the desktop shortcut of the named program lives.
+function Get-DesktopShortcutPath([string]$Name = $AppName) { $desk = [Environment]::GetFolderPath('Desktop'); return (Join-Path $desk "$Name.lnk") }
