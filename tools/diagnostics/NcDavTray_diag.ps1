@@ -390,49 +390,84 @@ switch ($mode) {
 				} else {
 					Add-Line $sb "Configs with server info: none"
 				}
-				# Installed mode: read config from registry (no secrets, no host leakage)
+				# Installed mode: read the shared mount list (no secrets, no host leakage)
 				try {
 					if (Test-Path $RegBase) {
-						$regCfg = Get-ItemProperty -Path $RegBase -ErrorAction Stop
 						Add-Line $sb "Installed config found in registry."
-						if ($regCfg.PSObject.Properties.Name -contains 'Server' -and $regCfg.Server) {
-							$script:KnownHosts += $regCfg.Server
-							Add-Line $sb ("  Server (registry): {0}" -f $regCfg.Server)
+						$regMounts = Join-Path $RegBase 'Mounts'
+						$mountKeys = @()
+						if (Test-Path $regMounts) { $mountKeys = @(Get-ChildItem -Path $regMounts -ErrorAction SilentlyContinue) }
+						Add-Line $sb ("  Mounts in list: {0}" -f $mountKeys.Count)
+						foreach ($mk in $mountKeys) {
+							$m = $null
+							try { $m = Get-ItemProperty -Path $mk.PSPath -ErrorAction Stop } catch { Add-Line $sb ("  - {0}: unreadable" -f $mk.PSChildName); continue }
+							$has = $m.PSObject.Properties.Name
+							$val = { param($n) if ($has -contains $n) { return [string]$m.$n } return '' }
+							$kind = & $val 'Kind'
+							if (-not $kind) { $kind = '<not set>' }
+							Add-Line $sb ("  - {0}  kind: {1}" -f $mk.PSChildName, $kind)
+							$srv = & $val 'Server'
+							$drv = & $val 'Drive'
+							$usr = & $val 'User'
+							$lbl = & $val 'Label'
+							Add-Line $sb ("      Server: {0}" -f $(if ($srv) { $srv } else { '<not set>' }))
+							Add-Line $sb ("      Drive: {0}" -f $(if ($drv) { $drv } else { '<not set>' }))
+							# A share is named by a token that grants access, so only its presence is reported
+							Add-Line $sb ("      Token set: {0}" -f $(if (& $val 'Token') { 'yes' } else { 'no' }))
+							Add-Line $sb ("      Password stored: {0}" -f $(if (& $val 'EncPass') { 'yes' } else { 'no' }))
+							if ($has -contains 'ExplicitPort') { Add-Line $sb ("      Explicit port: {0}" -f [bool][int]$m.ExplicitPort) }
+							if ($has -contains 'Enabled') { Add-Line $sb ("      Enabled: {0}" -f [bool][int]$m.Enabled) }
+							if ($srv) { $script:KnownHosts += $srv }
+							if ($drv) { $script:KnownDrives += $drv }
+							if ($usr) { $script:KnownNcUsers += $usr }
+							if ($lbl) { $script:KnownLabels += $lbl }
+							$script:Configs += [PSCustomObject]@{
+								Path    = ("Registry:{0}\{1}" -f $regMounts, $mk.PSChildName)
+								Server  = $srv
+								Drive   = $drv
+								User    = $usr
+								SubPath = (& $val 'SubPath')
+								Label   = $lbl
+							}
+						}
+						# Which program manages which entry, and which migrations have run. Both are
+						# what an unexpectedly empty configuration is diagnosed from.
+						$regOwners = Join-Path $RegBase 'Owners'
+						if (Test-Path $regOwners) {
+							try {
+								$own = Get-ItemProperty -Path $regOwners -ErrorAction Stop
+								foreach ($p in $own.PSObject.Properties) {
+									if ($p.Name -like 'PS*') { continue }
+									Add-Line $sb ("  Owner {0}: {1}" -f $p.Name, $p.Value)
+								}
+							} catch { Add-Line $sb "  Owners: unreadable" }
 						} else {
-							Add-Line $sb "  Server (registry): <not set>"
+							Add-Line $sb "  Owners: none"
 						}
-						if ($regCfg.PSObject.Properties.Name -contains 'Drive' -and $regCfg.Drive) {
-							$script:KnownDrives += $regCfg.Drive
-							Add-Line $sb ("  Drive (registry): {0}" -f $regCfg.Drive)
+						$regMig = Join-Path $RegBase 'Migrations'
+						if (Test-Path $regMig) {
+							try {
+								$mig = Get-ItemProperty -Path $regMig -ErrorAction Stop
+								foreach ($p in $mig.PSObject.Properties) {
+									if ($p.Name -like 'PS*') { continue }
+									Add-Line $sb ("  Migration {0}: {1}" -f $p.Name, $p.Value)
+								}
+							} catch { Add-Line $sb "  Migrations: unreadable" }
 						} else {
-							Add-Line $sb "  Drive (registry): <not set>"
+							Add-Line $sb "  Migrations: none"
 						}
-						if ($regCfg.PSObject.Properties.Name -contains 'User' -and $regCfg.User) {
-							$script:KnownNcUsers += $regCfg.User
-						}
-						if ($regCfg.PSObject.Properties.Name -contains 'Label' -and $regCfg.Label) {
-							$script:KnownLabels += $regCfg.Label
-						}
-						$cfgObj = [PSCustomObject]@{
-							Path    = ("Registry:{0}" -f $RegBase)
-							Server  = $null
-							Drive   = $null
-							User    = $null
-							SubPath = $null
-							Label   = $null
-						}
-						if ($regCfg.PSObject.Properties.Name -contains 'Server')  { $cfgObj.Server  = $regCfg.Server }
-						if ($regCfg.PSObject.Properties.Name -contains 'Drive')   { $cfgObj.Drive   = $regCfg.Drive }
-						if ($regCfg.PSObject.Properties.Name -contains 'User')    { $cfgObj.User    = $regCfg.User }
-						if ($regCfg.PSObject.Properties.Name -contains 'SubPath') { $cfgObj.SubPath = $regCfg.SubPath }
-						if ($regCfg.PSObject.Properties.Name -contains 'Label')   { $cfgObj.Label   = $regCfg.Label }
-
-						if ($cfgObj.Label) {
-							$script:KnownLabels += $cfgObj.Label
-						}
-						if ($cfgObj.Server -or $cfgObj.Drive -or $cfgObj.User) {
-							$script:Configs += $cfgObj
-						}
+						# Left over from before 2.0.0, when a single account lived directly in this
+						# key. The migration copies them into the list and leaves them in place.
+						try {
+							$flat = Get-ItemProperty -Path $RegBase -ErrorAction Stop
+							if (($flat.PSObject.Properties.Name -contains 'Server') -and $flat.Server) {
+								Add-Line $sb ("  Legacy flat account still present: {0}" -f $flat.Server)
+								$script:KnownHosts += $flat.Server
+								if ($flat.PSObject.Properties.Name -contains 'Drive' -and $flat.Drive) { $script:KnownDrives += $flat.Drive }
+								if ($flat.PSObject.Properties.Name -contains 'User' -and $flat.User) { $script:KnownNcUsers += $flat.User }
+								if ($flat.PSObject.Properties.Name -contains 'Label' -and $flat.Label) { $script:KnownLabels += $flat.Label }
+							}
+						} catch {}
 					} else {
 						Add-Line $sb "Installed config registry key not found."
 					}
