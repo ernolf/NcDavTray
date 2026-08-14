@@ -1,0 +1,38 @@
+version = 1
+
+# Files that cannot carry an SPDX header themselves (binary formats, strict JSON)
+# and build inputs whose content is inlined verbatim, so a header would end up
+# duplicated in every built script.
+
+[[annotations]]
+path = "modules/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = "meta/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = "assets/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = "i18n/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025 - 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# Repository metadata: comment syntax exists in most of these, but a header would
+# be the larger part of the file.
+
+[[annotations]]
+path = [".editorconfig", ".gitattributes", ".gitignore", ".github/FUNDING.yml", "LICENSE", "REUSE.toml"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025 - 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"

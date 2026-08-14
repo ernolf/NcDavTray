@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2025 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # NcDavTray diagnostics
 
 This folder contains tools to collect a text diagnostics report for NcDavTray / WebClient mapping problems on Windows.

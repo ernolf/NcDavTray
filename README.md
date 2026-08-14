@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2025 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 <!-- Project header -->
 <p>
   <img src="assets/logo-128.png" alt="NcDavTray logo" width="128" height="128" align="left">
