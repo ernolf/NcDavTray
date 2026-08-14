@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  reuse:
+    name: REUSE compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: reuse lint
+        run: docker run --rm --volume "${{ github.workspace }}:/data" fsfe/reuse lint
+
+  build:
+    name: Build and static checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The same target a contributor runs at home: assemble build\NcDavTray,
+      # then parse the result for syntax, unresolved commands, variables that
+      # are never assigned and i18n keys without a translation.
+      - name: make check
+        shell: cmd
+        run: make.cmd check
+
+  dist:
+    name: Release archive builds
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Not to publish anything, only to be sure the archive can be produced --
+      # a release must not be the first time this target is exercised.
+      - name: make dist
+        shell: cmd
+        run: make.cmd dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NcDavTray
+          path: build/*.zip
