@@ -26,6 +26,7 @@ function Install-App {
 			New-ItemProperty -LiteralPath $base -Name 'IntervalS' -Value ([int]$State.IntervalS) -PropertyType DWord -Force | Out-Null
 			New-ItemProperty -LiteralPath $base -Name 'LangPref' -Value ([string]$State.LangPref) -PropertyType String -Force | Out-Null
 			New-ItemProperty -LiteralPath $base -Name 'TrayIcons' -Value ([int][bool]$State.TrayIcons) -PropertyType DWord -Force | Out-Null
+			New-ItemProperty -LiteralPath $base -Name 'UpdateCheck' -Value ([int][bool]$State.UpdateCheck) -PropertyType DWord -Force | Out-Null
 			Write-MountEntriesToRegistry -Entries @($State.Mounts)
 			$accounts = Get-AccountsRegPath
 			if (-not (Test-Path -LiteralPath $accounts)) { New-Item -Path $accounts -Force | Out-Null }

@@ -24,6 +24,7 @@ function Import-AppConfig {
 		if ($have -contains 'IntervalS') { $State.IntervalS = [Math]::Min(600, [Math]::Max(5, [int]$json.IntervalS)) }
 		if ($have -contains 'LangPref') { $State.LangPref = [string]$json.LangPref }
 		if ($have -contains 'TrayIcons') { $State.TrayIcons = [bool]$json.TrayIcons }
+		if ($have -contains 'UpdateCheck') { $State.UpdateCheck = [bool]$json.UpdateCheck }
 		if ($hasList) {
 			$list = @()
 			foreach ($m in @($json.Mounts)) { if ($m) { $list += (ConvertTo-MountEntry $m) } }

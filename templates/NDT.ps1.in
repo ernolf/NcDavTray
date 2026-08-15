@@ -111,7 +111,7 @@ if (-not (([System.Drawing.FontFamily]::Families | ForEach-Object Name) -contain
 # persisted. The share passwords are not: they are asked for whenever a mount is
 # established and live in $script:Runtime, keyed by the entry's Id, for as long
 # as the process runs.
-$State = [pscustomobject]@{ SchemaVersion = 1; IntervalS = 15; LangPref = ''; TrayIcons = $true; Mounts = @() }
+$State = [pscustomobject]@{ SchemaVersion = 1; IntervalS = 15; LangPref = ''; TrayIcons = $true; UpdateCheck = $false; Mounts = @() }
 $script:Runtime = @{}
 $script:MapMutexes = @{}; $script:DriveGuards = @{}
 # One tray record per mount, keyed by the entry's Id, plus the always present
@@ -305,6 +305,7 @@ function Save-Config {
 		New-ItemProperty -LiteralPath $base -Name 'IntervalS' -Value ([int]$State.IntervalS) -PropertyType DWord -Force | Out-Null
 		New-ItemProperty -LiteralPath $base -Name 'LangPref' -Value ([string]$State.LangPref) -PropertyType String -Force | Out-Null
 		New-ItemProperty -LiteralPath $base -Name 'TrayIcons' -Value ([int][bool]$State.TrayIcons) -PropertyType DWord -Force | Out-Null
+		New-ItemProperty -LiteralPath $base -Name 'UpdateCheck' -Value ([int][bool]$State.UpdateCheck) -PropertyType DWord -Force | Out-Null
 		Write-MountEntriesToRegistry -Entries @($State.Mounts)
 		return
 	}
@@ -325,6 +326,7 @@ function Load-Config {
 				if ($have -contains 'IntervalS') { try { $State.IntervalS = [int]$p.IntervalS } catch {} }
 				if ($have -contains 'LangPref') { $State.LangPref = [string]$p.LangPref }
 				if ($have -contains 'TrayIcons') { try { $State.TrayIcons = [bool][int]$p.TrayIcons } catch {} }
+				if ($have -contains 'UpdateCheck') { try { $State.UpdateCheck = [bool][int]$p.UpdateCheck } catch {} }
 			} catch {}
 		}
 		$State.Mounts = @(Read-MountEntriesFromRegistry)
@@ -347,6 +349,7 @@ function Load-Config {
 	if ($have -contains 'IntervalS') { try { $State.IntervalS = [int]$raw.IntervalS } catch {} }
 	if ($have -contains 'LangPref') { $State.LangPref = [string]$raw.LangPref }
 	if ($have -contains 'TrayIcons') { try { $State.TrayIcons = [bool]$raw.TrayIcons } catch {} }
+	if ($have -contains 'UpdateCheck') { try { $State.UpdateCheck = [bool]$raw.UpdateCheck } catch {} }
 	$entries = @()
 	if ($have -contains 'Mounts') { foreach ($m in @($raw.Mounts)) { if ($m) { $entries += (ConvertTo-MountEntry $m) } } }
 	$State.Mounts = $entries
@@ -363,6 +366,11 @@ function Load-Config {
 #__inc:modules/Save-IconFromBitmap.ps1__
 #__inc:modules/Fetch-ServerFavicon.ps1__
 #__inc:modules/Fetch-UserAvatar.ps1__
+
+# ================================================================
+#	Update check (releases of the project)
+# ================================================================
+#__inc:modules/Get-UpdateInfo.ps1__
 
 # ================================================================
 #	Explorer branding (MountPoints2 label, drive icon HKCU)
@@ -1054,6 +1062,26 @@ $script:startupTimer = New-Object System.Windows.Forms.Timer
 $script:startupTimer.Interval = 1
 $script:startupTimer.Add_Tick({ $this.Stop(); $this.Dispose(); Connect-AllMounts })
 $script:startupTimer.Start()
+
+# Only when it was asked for, and behind the mounts rather than in front of them:
+# the answer is nothing anyone is waiting for, and the request holds this thread
+# for as long as the project page needs. A balloon, because it interrupts nothing
+# -- and only when there is something to say. Up to date and out of reach are both
+# answers nobody asked to be told about.
+if ($State.UpdateCheck) {
+	$script:updateTimer = New-Object System.Windows.Forms.Timer
+	$script:updateTimer.Interval = 3000
+	$script:updateTimer.Add_Tick({
+			$this.Stop(); $this.Dispose()
+			$info = $null
+			try { $info = Get-UpdateInfo } catch {}
+			if ($info -and $info.Ok -and $info.Newer) {
+				$shown = if ($info.Version) { $info.Version.ToString() } else { $info.Tag }
+				try { Show-CustomBalloon -Title $AppName -Text (T 'label.update_available' @{ version = $shown }) -TimeoutMs 6600 } catch {}
+			}
+		})
+	$script:updateTimer.Start()
+}
 
 # The poll keeps the mounts up but never asks for anything: a dialog out of a
 # timer tick would interrupt whatever the user is doing at that moment.
