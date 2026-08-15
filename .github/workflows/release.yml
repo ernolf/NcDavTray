@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: release
+
+# The release is written by hand -- notes, title, whether it is a pre-release --
+# and this only hangs the archive on it. So it waits for the release to exist
+# rather than creating one from a tag.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    name: Attach the release archive
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # What the release points at, not the default branch: a release is cut
+          # from a tag and that tag is what has to be built.
+          ref: ${{ github.event.release.tag_name }}
+
+      # The updater compares the version in the script against the tag of the
+      # newest release. Those two disagreeing is not a cosmetic problem: every
+      # installation would be told forever that an update is waiting, or none
+      # would ever hear of one. So it is settled here, before anything is built.
+      - name: Tag and meta/Version.ps1 agree
+        shell: pwsh
+        run: |
+          . .\meta\Version.ps1
+          $tag = '${{ github.event.release.tag_name }}'
+          if ($tag -ne "v$Version") { throw "release $tag was cut from a tree that says $Version -- see meta/Version.ps1" }
+          "archive=NcDavTray_v$Version.zip" >> $env:GITHUB_ENV
+
+      # The same targets a contributor runs at home, in the same order.
+      - name: make check
+        shell: cmd
+        run: make.cmd check
+
+      - name: make dist
+        shell: cmd
+        run: make.cmd dist
+
+      - name: Attach it
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload ${{ github.event.release.tag_name }} "build\$($env:archive)" --clobber
