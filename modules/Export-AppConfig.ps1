@@ -25,7 +25,7 @@ function Export-AppConfig {
 			$accounts += [pscustomobject]@{ Key = $key; DPAPI = $enc }
 		}
 		$payload = [pscustomobject]@{
-			SchemaVersion = $State.SchemaVersion; IntervalS = [int]$State.IntervalS; LangPref = [string]$State.LangPref
+			SchemaVersion = $State.SchemaVersion; IntervalS = [int]$State.IntervalS; LangPref = [string]$State.LangPref; TrayIcons = [bool]$State.TrayIcons
 			Mounts = @($State.Mounts); Accounts = $accounts
 		}
 		$payload | ConvertTo-Json -Depth 4 | Set-Content -Path $dlg.FileName -Encoding UTF8

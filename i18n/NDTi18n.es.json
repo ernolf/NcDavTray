@@ -9,6 +9,7 @@
 	"box.save_password": "Guardar contraseña",
 	"box.shortcut_desktop": "Acceso directo Escritorio",
 	"box.shortcut_startmenu": "Acceso Inicio",
+	"box.tray_icons": "Icono en la bandeja para cada recurso compartido",
 	"button.add": "Añadir",
 	"button.cache_watcher_start": "Iniciar observador de caché",
 	"button.cache_watcher_stop": "Detener observador de caché",

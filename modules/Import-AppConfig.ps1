@@ -23,6 +23,7 @@ function Import-AppConfig {
 		try { Unmap-AllMounts } catch {}
 		if ($have -contains 'IntervalS') { $State.IntervalS = [Math]::Min(600, [Math]::Max(5, [int]$json.IntervalS)) }
 		if ($have -contains 'LangPref') { $State.LangPref = [string]$json.LangPref }
+		if ($have -contains 'TrayIcons') { $State.TrayIcons = [bool]$json.TrayIcons }
 		if ($hasList) {
 			$list = @()
 			foreach ($m in @($json.Mounts)) { if ($m) { $list += (ConvertTo-MountEntry $m) } }
@@ -51,6 +52,7 @@ function Import-AppConfig {
 		Initialize-I18n $State.LangPref
 		try { if ($script:timer) { $script:timer.Interval = ([Math]::Max(5, [int]$State.IntervalS) * 1000) } } catch {}
 		if ($script:NumInterval -and -not $script:NumInterval.IsDisposed) { $script:NumInterval.Value = [int]$State.IntervalS }
+		if ($script:CheckboxTrayIcons -and -not $script:CheckboxTrayIcons.IsDisposed) { $script:CheckboxTrayIcons.Checked = [bool]$State.TrayIcons }
 		if ($script:RefreshLangList -is [scriptblock]) { & $script:RefreshLangList }
 		if ($script:ApplyLanguageNow -is [scriptblock]) { & $script:ApplyLanguageNow }
 		if ($script:ShareListView -and -not $script:ShareListView.IsDisposed) { Update-ShareListView $script:ShareListView }

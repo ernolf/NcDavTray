@@ -9,6 +9,7 @@
 	"box.save_password": "Save password",
 	"box.shortcut_desktop": "Desktop shortcut",
 	"box.shortcut_startmenu": "Start menu shortcut",
+	"box.tray_icons": "Tray icon for every share",
 	"button.add": "Add",
 	"button.cache_watcher_start": "Start cache watcher",
 	"button.cache_watcher_stop": "Stop cache watcher",

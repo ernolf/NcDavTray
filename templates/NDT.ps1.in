@@ -111,7 +111,7 @@ if (-not (([System.Drawing.FontFamily]::Families | ForEach-Object Name) -contain
 # persisted. The share passwords are not: they are asked for whenever a mount is
 # established and live in $script:Runtime, keyed by the entry's Id, for as long
 # as the process runs.
-$State = [pscustomobject]@{ SchemaVersion = 1; IntervalS = 15; LangPref = ''; Mounts = @() }
+$State = [pscustomobject]@{ SchemaVersion = 1; IntervalS = 15; LangPref = ''; TrayIcons = $true; Mounts = @() }
 $script:Runtime = @{}
 $script:MapMutexes = @{}; $script:DriveGuards = @{}
 # One tray record per mount, keyed by the entry's Id, plus the always present
@@ -304,6 +304,7 @@ function Save-Config {
 		if (-not (Test-Path -LiteralPath $base)) { New-Item -Path $base -Force | Out-Null }
 		New-ItemProperty -LiteralPath $base -Name 'IntervalS' -Value ([int]$State.IntervalS) -PropertyType DWord -Force | Out-Null
 		New-ItemProperty -LiteralPath $base -Name 'LangPref' -Value ([string]$State.LangPref) -PropertyType String -Force | Out-Null
+		New-ItemProperty -LiteralPath $base -Name 'TrayIcons' -Value ([int][bool]$State.TrayIcons) -PropertyType DWord -Force | Out-Null
 		Write-MountEntriesToRegistry -Entries @($State.Mounts)
 		return
 	}
@@ -323,6 +324,7 @@ function Load-Config {
 				$have = $p.PSObject.Properties.Name
 				if ($have -contains 'IntervalS') { try { $State.IntervalS = [int]$p.IntervalS } catch {} }
 				if ($have -contains 'LangPref') { $State.LangPref = [string]$p.LangPref }
+				if ($have -contains 'TrayIcons') { try { $State.TrayIcons = [bool][int]$p.TrayIcons } catch {} }
 			} catch {}
 		}
 		$State.Mounts = @(Read-MountEntriesFromRegistry)
@@ -344,6 +346,7 @@ function Load-Config {
 	$have = $raw.PSObject.Properties.Name
 	if ($have -contains 'IntervalS') { try { $State.IntervalS = [int]$raw.IntervalS } catch {} }
 	if ($have -contains 'LangPref') { $State.LangPref = [string]$raw.LangPref }
+	if ($have -contains 'TrayIcons') { try { $State.TrayIcons = [bool]$raw.TrayIcons } catch {} }
 	$entries = @()
 	if ($have -contains 'Mounts') { foreach ($m in @($raw.Mounts)) { if ($m) { $entries += (ConvertTo-MountEntry $m) } } }
 	$State.Mounts = $entries
@@ -760,11 +763,12 @@ function Show-SettingsDialog {
 	# Registered after the handler above, so what gets centred is the window the
 	# user ends up with and not the one it was built as.
 	Hook-FormScreen $f
-	# The list is what makes this window slow -- a status request per server, a
-	# read per drive -- and none of it may happen before there is something to
-	# look at. Shown is after the first paint, Refresh makes sure that paint has
-	# actually landed, and the wait cursor says the window is working. A window
-	# that looks like it is doing nothing gets clicked again.
+	# The list reads what the poll has worked out, but a window opened before the
+	# first poll is through has nothing to read and asks the servers itself -- a
+	# status request each, a read per drive -- and none of that may happen before
+	# there is something to look at. Shown is after the first paint, Refresh makes
+	# sure that paint has actually landed, and the wait cursor says the window is
+	# working. A window that looks like it is doing nothing gets clicked again.
 	$f.add_Shown({
 			$this.UseWaitCursor = $true
 			$this.Refresh()
@@ -777,6 +781,9 @@ function Show-SettingsDialog {
 	$script:IsSettingsOpen = $false
 	$script:SettingsForm = $null; $script:HostForm = $null
 	try { $f.Dispose() } catch {}
+	# The row icons hang on an image list the list view was handed, not one it owns,
+	# and a form disposes what is in it -- this would be left holding its handles.
+	try { if ($script:ShareStatusIcons) { $script:ShareStatusIcons.Dispose(); $script:ShareStatusIcons = $null } } catch {}
 	return $dlg
 }
 #__inc:modules/Install-App.ps1__
@@ -893,14 +900,22 @@ function Update-Trays([psobject[]]$Results) {
 		$wanted[$entry.Id] = $true
 		if (-not $script:Trays.ContainsKey($entry.Id)) { $script:Trays[$entry.Id] = New-MountTray $entry }
 		$rec = $script:Trays[$entry.Id]
-		$status = if ($byId.ContainsKey($entry.Id)) { [string]$byId[$entry.Id].Status } else { Get-MountStatus -Spec (New-MountSpecFromEntry $entry) }
+		$status = if ($byId.ContainsKey($entry.Id)) { [string]$byId[$entry.Id].Status } else { Get-MountStatus -Spec (New-MountSpecFromEntry $entry) -Enabled ([bool]$entry.Enabled) }
 		$lastRc = if ($byId.ContainsKey($entry.Id)) { [int]$byId[$entry.Id].LastError } else { 0 }
 		# The menus and balloons read this instead of asking the drive themselves
 		Set-MountTrayStatus $entry $status $lastRc
-		$rec.Notify.Visible = $true
+		$rec.Notify.Visible = [bool]$State.TrayIcons
 	}
 	# Snapshot the keys: Remove-MountTray edits the table
 	foreach ($id in @($script:Trays.Keys)) { if (-not $wanted.ContainsKey($id)) { Remove-MountTray $id } }
+}
+# The switch in the settings window, applied to the icons that already exist. The
+# icons themselves are kept either way: they carry the status the settings window
+# and the application balloon read, and polling them again for a checkbox would
+# cost a round trip to every server. The application icon is not one of these --
+# it is the one icon that has to stay, see New-ManagerTray.
+function Update-TrayIconVisibility {
+	foreach ($id in @($script:Trays.Keys)) { try { $script:Trays[$id].Notify.Visible = [bool]$State.TrayIcons } catch {} }
 }
 # The application icon is always there, even with nothing configured -- otherwise
 # an empty tray would leave no way to reach the program at all.
@@ -1053,6 +1068,10 @@ $script:timer.Add_Tick({
 			$results = @()
 			try { $results = Sync-Mounts } catch {}
 			try { Update-Trays $results } catch {}
+			# The settings list shows the same states the icons do, and with the icons
+			# switched off it is the only place that shows them. It reads what the poll
+			# has just written, so this costs the redraw and nothing else.
+			try { if ($script:ShareListView -and -not $script:ShareListView.IsDisposed) { Update-ShareListView $script:ShareListView } } catch {}
 		} finally { $script:MountBusy = $false }
 	})
 $script:timer.Start()

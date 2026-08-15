@@ -9,6 +9,7 @@
 	"box.save_password": "Enregistrer le mot de passe",
 	"box.shortcut_desktop": "Raccourci Bureau",
 	"box.shortcut_startmenu": "Raccourci Démarrer",
+	"box.tray_icons": "Icône de notification pour chaque partage",
 	"button.add": "Ajouter",
 	"button.cache_watcher_start": "Démarrer observateur de cache",
 	"button.cache_watcher_stop": "Arrêter observateur de cache",

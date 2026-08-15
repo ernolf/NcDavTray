@@ -19,6 +19,8 @@ function Update-ListViewColumns {
 			$width = [Math]::Max($width, [System.Windows.Forms.TextRenderer]::MeasureText($item.SubItems[$col.Index].Text, $font).Width)
 		}
 		$col.Width = $width + $pad
+		# An icon stands in front of the text of the first column and needs its own room
+		if ($col.Index -eq 0 -and $ListView.SmallImageList) { $col.Width += $ListView.SmallImageList.ImageSize.Width + 4 }
 		$total += $col.Width
 	}
 	# What is left over goes to the first column: a list that stops short of its own

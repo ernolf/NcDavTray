@@ -9,6 +9,7 @@
 	"box.save_password": "Guardar a senha",
 	"box.shortcut_desktop": "Atalho Desktop",
 	"box.shortcut_startmenu": "Atalho Iniciar",
+	"box.tray_icons": "Ícone na área de notificação para cada compartilhamento",
 	"button.add": "Adicionar",
 	"button.cache_watcher_start": "Iniciar monitor de cache",
 	"button.cache_watcher_stop": "Pare observador de cache",

@@ -9,6 +9,7 @@
 	"box.save_password": "Salva la password",
 	"box.shortcut_desktop": "Collegamento desktop",
 	"box.shortcut_startmenu": "Collegamento nel menu Start",
+	"box.tray_icons": "Icona nell'area di notifica per ogni condivisione",
 	"button.add": "Aggiungi",
 	"button.cache_watcher_start": "Avvia osservatore della cache",
 	"button.cache_watcher_stop": "Arresta osservatore della cache",

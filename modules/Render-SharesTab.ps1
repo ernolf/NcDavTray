@@ -32,6 +32,16 @@ function Render-SharesTab {
 	[void]$lv.Columns.Add((T 'label.server'))
 	[void]$lv.Columns.Add((T 'label.drive'))
 	[void]$lv.Columns.Add((T 'label.status'))
+	# One icon per row, and it is the icon the mount has in the tray rather than a
+	# marker of its own: with the tray icons switched off this list is where the
+	# colour is, and it says the same thing there as it says next to the clock.
+	# The shell is asked for the size, the same way New-StatusIcon asks it.
+	$script:ShareStatusIcons = New-Object System.Windows.Forms.ImageList
+	$iconSize = 16
+	try { $iconSize = [System.Windows.Forms.SystemInformation]::SmallIconSize.Width } catch {}
+	$script:ShareStatusIcons.ImageSize = New-Object System.Drawing.Size([Math]::Max(16, $iconSize), [Math]::Max(16, $iconSize))
+	$script:ShareStatusIcons.ColorDepth = [System.Windows.Forms.ColorDepth]::Depth32Bit
+	$lv.SmallImageList = $script:ShareStatusIcons
 
 	$sidePanel = New-Object System.Windows.Forms.FlowLayoutPanel
 	$sidePanel.AutoSize = $true; $sidePanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
@@ -54,14 +64,19 @@ function Render-SharesTab {
 	$script:ButtonShareRemove = New-Object System.Windows.Forms.Button; $script:ButtonShareRemove.Text = (T 'button.remove')
 	$script:ButtonShareConnect = New-Object System.Windows.Forms.Button; $script:ButtonShareConnect.Text = (T 'menu.connect')
 	$script:ButtonShareDisconnect = New-Object System.Windows.Forms.Button; $script:ButtonShareDisconnect.Text = (T 'menu.disconnect')
-	$script:ShareButtons = @($script:ButtonShareAdd, $script:ButtonShareEdit, $script:ButtonShareDuplicate, $script:ButtonShareRemove, $script:ButtonShareConnect, $script:ButtonShareDisconnect)
+	# The one thing a mount could only be asked for from its own tray icon. With the
+	# icons switched off it would be out of reach, so it is here as well -- under the
+	# short label, because this column is as wide as its longest one and every pixel
+	# it takes is one the list beside it loses.
+	$script:ButtonShareOpen = New-Object System.Windows.Forms.Button; $script:ButtonShareOpen.Text = (T 'button.open')
+	$script:ShareButtons = @($script:ButtonShareAdd, $script:ButtonShareEdit, $script:ButtonShareDuplicate, $script:ButtonShareRemove, $script:ButtonShareConnect, $script:ButtonShareDisconnect, $script:ButtonShareOpen)
 	foreach ($btn in $script:ShareButtons) {
 		$btn.AutoSize = $false
 		$btn.Height = $script:ButtonXH
 		$btn.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 6)
 		[void]$sidePanel.Controls.Add($btn)
 	}
-	# One width for all six, and it is the one the longest label needs. Left to
+	# One width for all of them, and it is the one the longest label needs. Left to
 	# themselves they are each as wide as their own text, and a column of buttons
 	# that all end somewhere else has no edge to line up with the list beside it.
 	# It is worked out again after a language change, where another label is the
@@ -73,7 +88,7 @@ function Render-SharesTab {
 	}
 	& $script:SizeShareButtons
 	# Everything but Add needs a row to work on
-	foreach ($btn in @($script:ButtonShareEdit, $script:ButtonShareDuplicate, $script:ButtonShareRemove, $script:ButtonShareConnect, $script:ButtonShareDisconnect)) { $btn.Enabled = $false }
+	foreach ($btn in @($script:ButtonShareEdit, $script:ButtonShareDuplicate, $script:ButtonShareRemove, $script:ButtonShareConnect, $script:ButtonShareDisconnect, $script:ButtonShareOpen)) { $btn.Enabled = $false }
 
 	# Footer: everything that is set once for the whole installation, stacked the way
 	# it was at the bottom of the account page it comes from. It sat there for as
@@ -95,6 +110,28 @@ function Render-SharesTab {
 	else { $script:LabelMode.Text = (T 'mode.installed'); $script:LabelMode.ForeColor = [System.Drawing.Color]::SteelBlue; $script:LabelMode.Font = New-Object System.Drawing.Font($UiFontFamily, 9, $UiFontStyleBold) }
 	$script:LabelMode.AutoSize = $true; $script:LabelMode.Anchor = 'Top, Left'
 	$script:LabelMode.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 6)
+	# Whether the mounts show up in the tray at all. It shares the line with the mode,
+	# which is one word against the width of the window: the switch costs no row of
+	# its own there, and it is read on the way past instead of sitting among the boxes
+	# below, which are about the installation. This one is not -- a portable copy has
+	# a tray like any other, so it works where the three below it are switched off.
+	# The box belongs in this window and nowhere else: with the icons gone there would
+	# be no mount menu left to find it in.
+	$modePanel = New-Object System.Windows.Forms.TableLayoutPanel
+	$modePanel.Dock = [System.Windows.Forms.DockStyle]::Fill
+	$modePanel.AutoSize = $true; $modePanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+	$modePanel.RowCount = 1; $modePanel.ColumnCount = 2
+	$modePanel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 0)
+	$modePanel.ColumnStyles.Clear()
+	[void]$modePanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+	[void]$modePanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
+	[void]$modePanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+	# Right and nothing else: the row is as tall as the mode word, which is set in a
+	# larger face than the box, and anchoring it to the top would leave it hanging.
+	$script:CheckboxTrayIcons = New-Object System.Windows.Forms.CheckBox; $script:CheckboxTrayIcons.Text = (T 'box.tray_icons'); $script:CheckboxTrayIcons.AutoSize = $true; $script:CheckboxTrayIcons.Anchor = 'Right'; $script:CheckboxTrayIcons.Checked = [bool]$State.TrayIcons
+	$script:CheckboxTrayIcons.Margin = New-Object System.Windows.Forms.Padding(12, 0, 0, 6)
+	[void]$modePanel.Controls.Add($script:LabelMode, 0, 0)
+	[void]$modePanel.Controls.Add($script:CheckboxTrayIcons, 1, 0)
 
 	# Poll interval and language on one line. The last column takes what is left,
 	# so the import button ends flush with the button rows below it -- on the page
@@ -253,6 +290,7 @@ function Render-SharesTab {
 		& $setTxt $script:ButtonShareRemove (T 'button.remove')
 		& $setTxt $script:ButtonShareConnect (T 'menu.connect')
 		& $setTxt $script:ButtonShareDisconnect (T 'menu.disconnect')
+		& $setTxt $script:ButtonShareOpen (T 'button.open')
 		& $script:SizeShareButtons
 		& $setTxt $script:LabelCheckInterval (T 'label.checkinterval')
 		& $setTxt $script:LabelLanguage (T 'label.language')
@@ -260,6 +298,7 @@ function Render-SharesTab {
 		& $setTxt $script:CheckboxAutostart (T 'box.autostart')
 		& $setTxt $script:CheckboxShortcutStartmenu (T 'box.shortcut_startmenu')
 		& $setTxt $script:CheckboxShortcutDesktop (T 'box.shortcut_desktop')
+		& $setTxt $script:CheckboxTrayIcons (T 'box.tray_icons')
 		if ($PortableMode) { & $setTxt $script:LabelMode (T 'mode.portable') } else { & $setTxt $script:LabelMode (T 'mode.installed') }
 		& $setTxt $script:ButtonInstall (T 'button.install2appdata')
 		& $setTxt $script:ButtonUninstall (T 'button.uninstall')
@@ -381,6 +420,11 @@ function Render-SharesTab {
 			$script:ButtonShareEdit.Enabled = $sel; $script:ButtonShareRemove.Enabled = $sel
 			$script:ButtonShareDuplicate.Enabled = $sel
 			$script:ButtonShareConnect.Enabled = $sel; $script:ButtonShareDisconnect.Enabled = $sel
+			# Explorer needs a drive that answers, which the tray menu reads from the last
+			# poll for the same reason -- see the Opening handler in New-MountTray.
+			$live = $false
+			if ($sel) { $rec = $script:Trays[[string]$script:ShareListView.SelectedItems[0].Tag]; $live = [bool]($rec -and $rec.Status -eq 'online') }
+			$script:ButtonShareOpen.Enabled = $live
 		})
 	$script:ButtonShareAdd.Add_Click({ Show-AddMenu -Under $this -OnAdded { Update-ShareListView $script:ShareListView } })
 	$script:ButtonShareEdit.Add_Click({
@@ -402,6 +446,10 @@ function Render-SharesTab {
 	$script:ButtonShareDisconnect.Add_Click({
 			if ($script:ShareListView.SelectedItems.Count -eq 0) { return }
 			Disconnect-MountById ([string]$script:ShareListView.SelectedItems[0].Tag); Update-ShareListView $script:ShareListView
+		})
+	$script:ButtonShareOpen.Add_Click({
+			if ($script:ShareListView.SelectedItems.Count -eq 0) { return }
+			Open-MountInExplorer ([string]$script:ShareListView.SelectedItems[0].Tag)
 		})
 	$lv.Add_DoubleClick({
 			if ($script:ShareListView.SelectedItems.Count -eq 0) { return }
@@ -431,6 +479,13 @@ function Render-SharesTab {
 			}
 			catch { try { $this.Checked = -not $this.Checked } catch {}; try { Show-ErrorT 'message.operation_failed' @{ err = $_.Exception.Message } } catch {} }
 		})
+	# In force at once, like the interval and the language above: the icons are there
+	# either way, only their visibility follows the box -- see Update-TrayIconVisibility.
+	$script:CheckboxTrayIcons.Add_Click({
+			$State.TrayIcons = [bool]$this.Checked
+			Save-Config
+			try { Update-TrayIconVisibility } catch {}
+		})
 	$script:ButtonInstall.Add_Click({ Install-App })
 	$script:ButtonUninstall.Add_Click({ Uninstall-App })
 	$script:ButtonExportConfig.Add_Click({ Export-AppConfig })
@@ -438,7 +493,7 @@ function Render-SharesTab {
 	$script:ButtonExportToPortable.Add_Click({ Export-AppToPortable })
 	$script:ButtonClose1.Add_Click({ $f.DialogResult = [System.Windows.Forms.DialogResult]::Cancel; $f.Close() })
 
-	[void]$footerPanel.Controls.Add($script:LabelMode, 0, 0)
+	[void]$footerPanel.Controls.Add($modePanel, 0, 0)
 	[void]$footerPanel.Controls.Add($globalsPanel, 0, 1)
 	[void]$footerPanel.Controls.Add($checkPanel, 0, 2)
 	[void]$footerPanel.Controls.Add($btnRow1, 0, 3)
