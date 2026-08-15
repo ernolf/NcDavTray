@@ -2,11 +2,7 @@
 # when the window was cancelled -- the caller decides what a cancel means, which
 # is not the same answer at startup as it is when a password is being stored.
 function Prompt-Passphrase {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][string]$Title,
-		[switch]$Confirm
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][string]$Title, [switch]$Confirm )
 	$f = New-Object System.Windows.Forms.Form; Apply-BrandIconToForm $f; Hook-FormDpi $f; Hook-FormScreen $f
 	$f.Text = $Title; $f.StartPosition = 'CenterScreen'; $f.FormBorderStyle = 'FixedDialog'; $f.MaximizeBox = $false; $f.MinimizeBox = $false; $f.TopMost = $true
 	$h = 160; if ($Confirm) { $h = 210 }

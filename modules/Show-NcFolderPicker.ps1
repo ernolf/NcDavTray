@@ -1,12 +1,6 @@
 # Modal Nextcloud folder picker. Returns: normalized subpath like "A/B/C", or '' for root, or $null on Cancel.
 function Show-NcFolderPicker {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Server,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$User,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Pass,
-		[AllowEmptyString()][string]$SubPath
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyString()][string]$Server, [Parameter(Mandatory)][AllowEmptyString()][string]$User, [Parameter(Mandatory)][AllowEmptyString()][string]$Pass, [AllowEmptyString()][string]$SubPath )
 	# Pre-flight: need server/user/password to query OCS
 	if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($User)) { return $null }
 	if ([string]::IsNullOrWhiteSpace($Pass)) { return $null }

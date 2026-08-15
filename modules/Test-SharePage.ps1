@@ -6,11 +6,7 @@
 # Returns 'ok', 'notfound' or 'unreachable'. Nothing of the page is read: only
 # whether the server produced one.
 function Test-SharePage {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][string]$Server,
-		[Parameter(Mandatory)][string]$Token
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][string]$Server, [Parameter(Mandatory)][string]$Token )
 
 	$req = New-HttpGetRequest ('https://{0}/s/{1}' -f $Server, [uri]::EscapeDataString($Token)) 6000 'text/html'
 	try {

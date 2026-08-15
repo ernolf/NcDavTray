@@ -52,7 +52,7 @@ function Render-WebDavCacheTab([Parameter(Mandatory)] [System.Windows.Forms.TabP
 	$lv.add_DrawItem({ param($s,$e) }) # required when OwnerDraw is true in Details view
 	$lv.add_DrawSubItem({
 		param($s,$e)
-		$font  = if ($script:CacheListEntryFont) { $script:CacheListEntryFont } else { $e.SubItem.Font }
+		$font = if ($script:CacheListEntryFont) { $script:CacheListEntryFont } else { $e.SubItem.Font }
 		$flags = [System.Windows.Forms.TextFormatFlags]::Left -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter
 		# Always paint our own background (no DrawBackground)
 		if (($e.ItemIndex % 2) -eq 1) { $e.Graphics.FillRectangle([System.Drawing.Brushes]::Honeydew, $e.Bounds) } else { $e.Graphics.FillRectangle([System.Drawing.SystemBrushes]::Window, $e.Bounds) }

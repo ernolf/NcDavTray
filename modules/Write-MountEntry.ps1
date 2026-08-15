@@ -4,10 +4,7 @@
 # Order is the list's business, not the entry's: a program that writes only its
 # own entry appends once and afterwards keeps the place the list gave it.
 function Write-MountEntry {
-	[CmdletBinding()] param(
-		[Parameter(Mandatory)][psobject]$Entry,
-		[int]$Order = -1
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][psobject]$Entry, [int]$Order = -1 )
 	$root = Get-MountsRegPath
 	if (-not (Test-Path -LiteralPath $root)) { New-Item -Path $root -Force | Out-Null }
 	$path = Join-Path $root $Entry.Id

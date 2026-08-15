@@ -4,11 +4,7 @@
 # it is thrown rather than swallowed: the caller has to tell "wrong passphrase"
 # from "no file", and only one of the two is worth asking again about.
 function Unprotect-PortableSecret {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][string]$Passphrase,
-		[Parameter(Mandatory)][string]$Path
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][string]$Passphrase, [Parameter(Mandatory)][string]$Path )
 	$blob = [System.IO.File]::ReadAllBytes($Path)
 	if ($blob.Length -lt 41) { throw 'Secret file is corrupt.' }
 	$tag = [System.Text.Encoding]::ASCII.GetString($blob, 0, 5)

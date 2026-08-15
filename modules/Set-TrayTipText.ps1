@@ -3,11 +3,7 @@
 # its own -- see Register-TrayHoverTip. Written this way a status change also
 # reaches a tooltip that is standing open at that moment.
 function Set-TrayTipText {
-	[CmdletBinding()]
-	param(
-		[Parameter(Position = 0)][System.Windows.Forms.NotifyIcon]$Notify,
-		[Parameter(Position = 1)][string]$Text = ''
-	)
+	[CmdletBinding()] param( [Parameter(Position = 0)][System.Windows.Forms.NotifyIcon]$Notify, [Parameter(Position = 1)][string]$Text = '' )
 	if (-not $Notify) { return }
 	if (-not ($script:TrayTipTexts -is [hashtable])) { $script:TrayTipTexts = @{} }
 	$script:TrayTipTexts[$Notify] = $Text

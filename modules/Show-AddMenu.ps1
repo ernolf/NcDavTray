@@ -6,11 +6,7 @@
 # OnAdded is what the caller wants done afterwards; the menu itself knows nothing
 # about the window it was opened from.
 function Show-AddMenu {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][System.Windows.Forms.Control]$Under,
-		[scriptblock]$OnAdded = $null
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][System.Windows.Forms.Control]$Under, [scriptblock]$OnAdded = $null )
 	$done = $OnAdded
 	$menu = New-Object System.Windows.Forms.ContextMenuStrip
 	$miLink = $menu.Items.Add((T 'menu.add_share_link'))

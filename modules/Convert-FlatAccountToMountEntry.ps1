@@ -10,7 +10,5 @@ function Convert-FlatAccountToMountEntry {
 	$get = { param($name) if ($have -contains $name) { return [string]$Source.$name } return '' }
 	$server = & $get 'Server'
 	if ([string]::IsNullOrWhiteSpace($server)) { return $null }
-	return (New-MountEntry -Server $server -Kind 'account' -User (& $get 'User') `
-		-SubPath (& $get 'SubPath') -Drive (& $get 'Drive') -Label (& $get 'Label') `
-		-ExplicitPort $false -Enabled $true)
+	return (New-MountEntry -Server $server -Kind 'account' -User (& $get 'User') -SubPath (& $get 'SubPath') -Drive (& $get 'Drive') -Label (& $get 'Label') -ExplicitPort $false -Enabled $true)
 }

@@ -9,12 +9,7 @@
 # HeldBy names the drives that hold the identities in question, so an entry that is
 # merely configured counts for nothing -- there has to be a connection to join.
 function Test-SharedServerIdentity {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][psobject]$Entry,
-		[Parameter(Mandatory)][AllowEmptyCollection()][psobject[]]$Others,
-		[Parameter(Mandatory)][AllowEmptyCollection()][string[]]$HeldBy
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][psobject]$Entry, [Parameter(Mandatory)][AllowEmptyCollection()][psobject[]]$Others, [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$HeldBy )
 	$held = @{}
 	foreach ($d in @($HeldBy)) { if ($d) { $held[([string]$d).ToUpperInvariant()] = $true } }
 	foreach ($o in @($Others)) {

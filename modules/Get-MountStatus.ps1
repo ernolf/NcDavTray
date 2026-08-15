@@ -9,13 +9,7 @@
 #
 # Returns one of: disabled, invalid_drive, offline, maintenance, online, failed.
 function Get-MountStatus {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][psobject]$Spec,
-		[bool]$Enabled = $true,
-		[object]$Connected = $null,
-		[switch]$SkipServerCheck
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][psobject]$Spec, [bool]$Enabled = $true, [object]$Connected = $null, [switch]$SkipServerCheck )
 	if (-not $Enabled) { return 'disabled' }
 	if (-not (Test-ValidDrive $Spec.Drive)) { return 'invalid_drive' }
 	if (-not $SkipServerCheck) {

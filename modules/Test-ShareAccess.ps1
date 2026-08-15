@@ -9,13 +9,7 @@
 # The answer also names the shared file or folder, which is handed back through
 # Name where a caller wants it.
 function Test-ShareAccess {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][string]$Server,
-		[Parameter(Mandatory)][string]$Token,
-		[AllowEmptyString()][string]$Password = '',
-		[ref]$Name
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][string]$Server, [Parameter(Mandatory)][string]$Token, [AllowEmptyString()][string]$Password = '', [ref]$Name )
 
 	$body = 't={0}&password={1}' -f [uri]::EscapeDataString($Token), [uri]::EscapeDataString($Password)
 	$bytes = [System.Text.Encoding]::UTF8.GetBytes($body)

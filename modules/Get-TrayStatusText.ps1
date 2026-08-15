@@ -3,13 +3,7 @@
 # programs come through here, so a share of the manager reads exactly like the
 # drive of NcDavTray -- from the tray the two are the same thing.
 function Get-TrayStatusText {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Name,
-		[Parameter(Mandatory)][string]$Status,
-		[AllowEmptyString()][string]$Drive = '',
-		[int]$Rc = 0
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyString()][string]$Name, [Parameter(Mandatory)][string]$Status, [AllowEmptyString()][string]$Drive = '', [int]$Rc = 0 )
 	$key = switch ($Status) {
 		'online' { 'tray.status_online' }
 		'offline' { 'tray.status_offline' }

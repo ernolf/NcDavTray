@@ -2,10 +2,7 @@
 # The page asks nothing beyond these, so this is where an entry of the mount list
 # is put in front of it.
 function Set-AccountEditorContext {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][psobject]$Entry
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][psobject]$Entry )
 	# A working copy, because the page writes into it while it is open and a cancelled
 	# window must leave the list as it was. The one field the page needs on top of a
 	# mount entry is fetched separately: the password blob belongs to the server/user
@@ -21,9 +18,7 @@ function Set-AccountEditorContext {
 	# mapped again as well -- see Update-ShareById.
 	$script:EditPrevLabel = [string]$Entry.Label
 	$script:EditSave = {
-		$e = New-MountEntry -Id $script:Edit.Id -Server $script:Edit.Server -Kind $script:Edit.Kind -User $script:Edit.User -Token $script:Edit.Token `
-			-SubPath $script:Edit.SubPath -Drive $script:Edit.Drive -Label ([string]$script:Edit.Label) `
-			-ExplicitPort:([bool]$script:Edit.ExplicitPort) -Enabled:([bool]$script:Edit.Enabled)
+		$e = New-MountEntry -Id $script:Edit.Id -Server $script:Edit.Server -Kind $script:Edit.Kind -User $script:Edit.User -Token $script:Edit.Token -SubPath $script:Edit.SubPath -Drive $script:Edit.Drive -Label ([string]$script:Edit.Label) -ExplicitPort:([bool]$script:Edit.ExplicitPort) -Enabled:([bool]$script:Edit.Enabled)
 		$list = @(); $found = $false
 		foreach ($x in @($State.Mounts)) { if ($x) { if ($x.Id -eq $e.Id) { $list += $e; $found = $true } else { $list += $x } } }
 		# A new account is on this page before it is in the list -- see Add-Account.
@@ -74,8 +69,7 @@ function Set-AccountEditorContext {
 		# An account that has just been added has never been mapped: there is no drive
 		# to take down, and nothing to describe the mapping that was not there with.
 		if (-not [string]::IsNullOrWhiteSpace($OldServer) -and -not [string]::IsNullOrWhiteSpace($OldDrive)) {
-			$oldSpec = New-MountSpec -Server $OldServer -Kind $now.Kind -User $OldUser -Token $now.Token `
-				-SubPath $OldSubPath -Drive $OldDrive -Label $script:EditPrevLabel -ExplicitPort:([bool]$now.ExplicitPort)
+			$oldSpec = New-MountSpec -Server $OldServer -Kind $now.Kind -User $OldUser -Token $now.Token -SubPath $OldSubPath -Drive $OldDrive -Label $script:EditPrevLabel -ExplicitPort:([bool]$now.ExplicitPort)
 			if (((Get-MountKey $oldSpec) -ne (Get-MountKey (New-MountSpecFromEntry $now))) -or ($script:EditPrevLabel -ne $now.Label)) {
 				try { Unmap-DriveIfOurs -Spec $oldSpec -Force -RemoveProfile } catch {}
 				try { Refresh-ExplorerDriveRemoval $oldSpec.Drive } catch {}

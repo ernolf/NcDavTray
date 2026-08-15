@@ -3,11 +3,7 @@
 # secret file was unlocked into at startup. Either way a pair answered once is
 # answered for every mount that shares it.
 function Get-AccountSecret {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Server,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$User
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyString()][string]$Server, [Parameter(Mandatory)][AllowEmptyString()][string]$User )
 	if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($User)) { return '' }
 	$name = Get-AccountKey -Server $Server -User $User
 	if (-not $IsInstalled) {

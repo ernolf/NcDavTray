@@ -4,13 +4,7 @@
 # situation belongs to the host and not to the mount that ran into it: the one
 # that has to give way may well be another.
 function Show-CredentialConflict {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Server,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Drive,
-		[int]$Code = 1219,
-		[AllowEmptyString()][string]$Share = ''
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyString()][string]$Server, [Parameter(Mandatory)][AllowEmptyString()][string]$Drive, [int]$Code = 1219, [AllowEmptyString()][string]$Share = '' )
 	$idents = Get-UsedServerIdentities -Server $Server
 	$drives = @($idents.Drives)
 	$vars = @{ server = $Server; drive = $Drive; code = $Code; share = $Share; drives = ($drives -join (' {0} ' -f (T 'label.list_and'))) }

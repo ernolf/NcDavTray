@@ -1,12 +1,6 @@
 # depth = 1 listing of children folder names at given parent path
 function Get-NcFolderChildren {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Server,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$User,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Pass,
-		[AllowEmptyString()][string]$ParentPath
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyString()][string]$Server, [Parameter(Mandatory)][AllowEmptyString()][string]$User, [Parameter(Mandatory)][AllowEmptyString()][string]$Pass, [AllowEmptyString()][string]$ParentPath )
 	if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($User)) { return @() }
 	if ([string]::IsNullOrWhiteSpace($Pass)) { return @() }
 	$enc = Encode-OcsPath $ParentPath

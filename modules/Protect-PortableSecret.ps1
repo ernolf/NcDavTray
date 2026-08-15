@@ -7,12 +7,7 @@
 # the two, and a reader that guessed would guess wrong on a password shaped like
 # json.
 function Protect-PortableSecret {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][string]$Plain,
-		[Parameter(Mandatory)][string]$Passphrase,
-		[Parameter(Mandatory)][string]$Path
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][string]$Plain, [Parameter(Mandatory)][string]$Passphrase, [Parameter(Mandatory)][string]$Path )
 	if ([string]::IsNullOrEmpty($Plain) -or [string]::IsNullOrEmpty($Passphrase)) { throw 'Missing content or passphrase.' }
 	$salt = New-RandomBytes 16
 	$iv = New-RandomBytes 16

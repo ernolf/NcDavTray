@@ -7,10 +7,7 @@
 # list of them), and so does the question whether the program's storage is still
 # there, so both come in as scriptblocks from the caller.
 function Run-Watchdog {
-	[CmdletBinding()] param(
-		[Parameter(Mandatory)][scriptblock]$OnOwnerGone,
-		[scriptblock]$OwnerBroken = $null
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][scriptblock]$OnOwnerGone, [scriptblock]$OwnerBroken = $null )
 	$created = $false
 	$wdKey = if ($OwnerPid -gt 0) { "Local\{0}Watchdog-{1}" -f $AppName, $OwnerPid } else { $WDMutex }
 	try { $wdMutex = New-Object System.Threading.Mutex($true, $wdKey, [ref]$created); if (-not $created) { return } } catch { return }

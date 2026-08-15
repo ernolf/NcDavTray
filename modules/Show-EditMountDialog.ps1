@@ -9,11 +9,7 @@
 # server/user pair behind it, and is therefore none of the returned entry's
 # business.
 function Show-EditMountDialog {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][psobject]$Entry,
-		[Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Reserved
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][psobject]$Entry, [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Reserved )
 
 	# One window per entry. A modal dialog does not stop the tray menus, so without
 	# this a second right click would open the same mount again, and whichever
@@ -215,9 +211,7 @@ function Show-EditMountDialog {
 			$label = $shareName
 		}
 		if ([string]::IsNullOrWhiteSpace($label)) { $label = $Entry.Token }
-		return (New-MountEntry -Id $Entry.Id -Server $Entry.Server -Kind $Entry.Kind -User $Entry.User -Token $Entry.Token `
-				-SubPath (Normalize-SubPath $txtSub.Text) -Drive $cmbDrive.Text -Label $label `
-				-ExplicitPort:([bool]$Entry.ExplicitPort) -Enabled:([bool]$Entry.Enabled))
+		return (New-MountEntry -Id $Entry.Id -Server $Entry.Server -Kind $Entry.Kind -User $Entry.User -Token $Entry.Token -SubPath (Normalize-SubPath $txtSub.Text) -Drive $cmbDrive.Text -Label $label -ExplicitPort:([bool]$Entry.ExplicitPort) -Enabled:([bool]$Entry.Enabled))
 	} finally {
 		[void]$script:MountDialogs.Remove($Entry.Id)
 		$frm.Dispose()

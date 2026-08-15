@@ -2,12 +2,7 @@
 # nothing to store. Every mount of that pair is served by this one value, so a
 # password set here is in force for all of them from the next connect on.
 function Set-AccountSecret {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Server,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$User,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$EncPass
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyString()][string]$Server, [Parameter(Mandatory)][AllowEmptyString()][string]$User, [Parameter(Mandatory)][AllowEmptyString()][string]$EncPass )
 	if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($User)) { return }
 	$name = Get-AccountKey -Server $Server -User $User
 	if (-not $IsInstalled) {

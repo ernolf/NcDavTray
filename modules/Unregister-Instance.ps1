@@ -3,10 +3,7 @@
 # that waits for the last instance to go would wait for a process that is
 # already gone. An empty -Role removes every role this PID holds.
 function Unregister-Instance {
-	[CmdletBinding()] param(
-		[int]$ProcessId = $PID,
-		[string]$Role = ''
-	)
+	[CmdletBinding()] param( [int]$ProcessId = $PID, [string]$Role = '' )
 	Write-Verbose ("[Instances] Unregister-Instance: Pid={0}, Role={1}" -f $ProcessId, $Role)
 	$entries = Read-InstanceEntries
 	if (-not $entries -or $entries.Count -eq 0) { return }

@@ -7,19 +7,7 @@
 # ExplicitPort defaults to on: a share mounted next to an account mapping of the
 # same server needs the second server identity, and that is the normal case here.
 function New-MountEntry {
-	[CmdletBinding()]
-	param(
-		[string]$Id = '',
-		[string]$Server = '',
-		[ValidateSet('account', 'share', 'share-legacy')][string]$Kind = 'share',
-		[string]$User = '',
-		[string]$Token = '',
-		[string]$SubPath = '',
-		[string]$Drive = '',
-		[string]$Label = '',
-		[bool]$ExplicitPort = $true,
-		[bool]$Enabled = $true
-	)
+	[CmdletBinding()] param( [string]$Id = '', [string]$Server = '', [ValidateSet('account', 'share', 'share-legacy')][string]$Kind = 'share', [string]$User = '', [string]$Token = '', [string]$SubPath = '', [string]$Drive = '', [string]$Label = '', [bool]$ExplicitPort = $true, [bool]$Enabled = $true )
 	if ([string]::IsNullOrWhiteSpace($Id)) { $Id = [guid]::NewGuid().ToString('N') }
 	return [pscustomobject]@{
 		Id = $Id; Server = $Server; Kind = $Kind; User = $User; Token = $Token

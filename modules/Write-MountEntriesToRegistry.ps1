@@ -2,9 +2,7 @@
 # that are no longer in it. Write-MountEntry is for a single entry and leaves the
 # rest of the store alone.
 function Write-MountEntriesToRegistry {
-	[CmdletBinding()] param(
-		[Parameter(Mandatory)][AllowEmptyCollection()][psobject[]]$Entries
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyCollection()][psobject[]]$Entries )
 	$root = Get-MountsRegPath
 	if (-not (Test-Path -LiteralPath $root)) { New-Item -Path $root -Force | Out-Null }
 	$keep = @{}

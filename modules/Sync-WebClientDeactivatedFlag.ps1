@@ -1,8 +1,6 @@
 # Keeps script-level deactivated flag in sync with the current WebClient StartType
 function Sync-WebClientDeactivatedFlag {
-	param(
-		[System.ServiceProcess.ServiceController]$Service
-	)
+	param( [System.ServiceProcess.ServiceController]$Service )
 	try {
 		if (-not $Service) { $Service = Get-Service -Name WebClient -ErrorAction Stop }
 		$startRaw = [string]$Service.StartType

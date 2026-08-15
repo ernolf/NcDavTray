@@ -9,25 +9,10 @@
 # identity for the same host and lets a share coexist with an account mapping
 # instead of failing with ERROR_SESSION_CREDENTIAL_CONFLICT (1219).
 function New-MountSpec {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][string]$Server,
-		[ValidateSet('account', 'share', 'share-legacy')][string]$Kind = 'account',
-		[string]$User = '',
-		[string]$Token = '',
-		[string]$SubPath = '',
-		[string]$Drive = '',
-		[string]$Label = '',
-		[switch]$ExplicitPort
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][string]$Server, [ValidateSet('account', 'share', 'share-legacy')][string]$Kind = 'account', [string]$User = '', [string]$Token = '', [string]$SubPath = '', [string]$Drive = '', [string]$Label = '', [switch]$ExplicitPort )
 	return [pscustomobject]@{
-		Server       = $Server
-		Kind         = $Kind
-		User         = $User
-		Token        = $Token
-		SubPath      = $SubPath
-		Drive        = $Drive
-		Label        = $Label
+		Server = $Server; Kind = $Kind; User = $User; Token = $Token
+		SubPath = $SubPath; Drive = $Drive; Label = $Label
 		ExplicitPort = [bool]$ExplicitPort
 	}
 }

@@ -5,13 +5,7 @@
 # asks about the account it is editing, which is not necessarily the one the
 # running program is mapping.
 function Test-NcFolderExists {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Server,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$User,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Pass,
-		[AllowEmptyString()][string]$SubPath
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyString()][string]$Server, [Parameter(Mandatory)][AllowEmptyString()][string]$User, [Parameter(Mandatory)][AllowEmptyString()][string]$Pass, [AllowEmptyString()][string]$SubPath )
 	if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($User)) { return $true }
 	if ([string]::IsNullOrWhiteSpace($Pass)) { return $true }
 	$enc = Encode-OcsPath $SubPath

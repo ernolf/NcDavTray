@@ -3,13 +3,7 @@
 # back of the alphabet -- that is the end users reach for, and the low letters
 # belong to hardware. Called again whenever the account behind the box changes.
 function Update-DriveLetterPicker {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][System.Windows.Forms.ComboBox]$ComboBox,
-		[string]$Current = '',
-		[AllowEmptyCollection()][string[]]$Reserved = @(),
-		[ValidateSet('Lowest', 'Highest')][string]$Prefer = 'Lowest'
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][System.Windows.Forms.ComboBox]$ComboBox, [string]$Current = '', [AllowEmptyCollection()][string[]]$Reserved = @(), [ValidateSet('Lowest', 'Highest')][string]$Prefer = 'Lowest' )
 	if (-not ($ComboBox.Tag -is [hashtable])) { Initialize-DriveLetterPicker -ComboBox $ComboBox }
 	$tag = $ComboBox.Tag
 	$tag.Current = if (Test-ValidDrive $Current) { ([string]$Current).ToUpperInvariant() } else { '' }

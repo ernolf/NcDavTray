@@ -3,10 +3,7 @@
 # window is opened out of that one while it stays up. So what the page takes over
 # is put back afterwards -- it tears its own down on close.
 function Show-AccountSettingsDialog {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][psobject]$Entry
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][psobject]$Entry )
 	$keepTip = $script:Tip; $keepHost = $script:HostForm; $keepLang = $script:ApplyLanguageNow; $keepClose = $script:ButtonClose1
 	try {
 		Set-AccountEditorContext -Entry $Entry

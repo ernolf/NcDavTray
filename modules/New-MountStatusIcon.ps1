@@ -6,11 +6,7 @@
 # A mount whose drive letter is unusable shows the warning glyph instead, because a
 # letter that cannot be rendered is exactly the case the user has to look at.
 function New-MountStatusIcon {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][psobject]$Entry,
-		[Parameter(Mandatory)][string]$Status
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][psobject]$Entry, [Parameter(Mandatory)][string]$Status )
 	$valid = (-not [string]::IsNullOrWhiteSpace($Entry.Drive)) -and ($Entry.Drive -match '^[A-Za-z]:$')
 	$label = if ($valid) { $Entry.Drive.Substring(0, 2) } else { '!' }
 	$color = if (-not $valid) { [System.Drawing.Color]::Goldenrod }

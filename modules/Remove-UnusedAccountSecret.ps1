@@ -5,11 +5,7 @@
 # Called after the entry has been removed from the store, so what is still listed
 # is what still needs the password.
 function Remove-UnusedAccountSecret {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][AllowEmptyString()][string]$Server,
-		[Parameter(Mandatory)][AllowEmptyString()][string]$User
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyString()][string]$Server, [Parameter(Mandatory)][AllowEmptyString()][string]$User )
 	if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($User)) { return }
 	$key = Get-AccountKey -Server $Server -User $User
 	foreach ($e in @(Read-MountEntriesFromRegistry)) {

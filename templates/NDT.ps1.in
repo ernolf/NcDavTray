@@ -696,9 +696,7 @@ function Copy-ShareById([string]$Id) {
 	if (-not $src) { return }
 	$used = @(Get-ReservedDrives)
 	if (@(Get-FreeDriveLetters -Exclude $used).Count -eq 0) { Show-WarnT 'message.no_free_drive_letter'; return }
-	$copy = New-MountEntry -Server $src.Server -Kind $src.Kind -User $src.User -Token $src.Token `
-		-SubPath $src.SubPath -Drive '' -Label ([string]$src.Label) `
-		-ExplicitPort:([bool]$src.ExplicitPort) -Enabled:$true
+	$copy = New-MountEntry -Server $src.Server -Kind $src.Kind -User $src.User -Token $src.Token -SubPath $src.SubPath -Drive '' -Label ([string]$src.Label) -ExplicitPort:([bool]$src.ExplicitPort) -Enabled:$true
 	$edited = Show-EditMountDialog -Entry $copy -Reserved $used
 	if (-not $edited) { return }
 	if (-not (Confirm-ServerIdentity $edited)) { return }

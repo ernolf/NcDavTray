@@ -4,13 +4,7 @@
 # running and where it lives, which is what a reader needs to tell the instances
 # apart without asking them.
 function Register-Instance {
-	[CmdletBinding()] param(
-		[int]$ProcessId = $PID,
-		[Parameter(Mandatory)][string]$Role,
-		[string]$Tag = '',
-		[string]$App = $AppNameShort,
-		[string]$Path = (Get-ThisScriptPath)
-	)
+	[CmdletBinding()] param( [int]$ProcessId = $PID, [Parameter(Mandatory)][string]$Role, [string]$Tag = '', [string]$App = $AppNameShort, [string]$Path = (Get-ThisScriptPath) )
 	Write-Verbose ("[Instances] Register-Instance: Pid={0}, Role={1}, App={2}, Tag={3}" -f $ProcessId, $Role, $App, $Tag)
 	$entries = Get-AliveInstanceEntries; $filtered = @()
 	foreach ($e in $entries) { [int]$pidValue = 0; try { $pidValue = [int]$e.Pid } catch { $pidValue = 0 }; if ($pidValue -eq $ProcessId -and [string]$e.Role -eq $Role) { continue }; $filtered += $e }

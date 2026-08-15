@@ -8,11 +8,7 @@
 # delegate the message loop calls later sees neither the locals nor the
 # parameters of the call that created it.
 function Initialize-DriveLetterPicker {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][System.Windows.Forms.ComboBox]$ComboBox,
-		[scriptblock]$OnChanged = $null
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][System.Windows.Forms.ComboBox]$ComboBox, [scriptblock]$OnChanged = $null )
 	$ComboBox.DrawMode = 'OwnerDrawFixed'; $ComboBox.ItemHeight = $ComboBox.Font.Height + 4
 	$ComboBox.Tag = @{ Statuses = @{}; Current = ''; Reserved = @(); Prev = $null; OnChanged = $OnChanged }
 	# Guard: prevent re-entrancy while the selection is corrected programmatically

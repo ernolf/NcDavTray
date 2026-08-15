@@ -1,10 +1,6 @@
 # Call this everywhere the drive is torn down so label + icon are cleaned consistently
 function Unmap-DriveIfOurs {
-	[CmdletBinding()]
-	param(
-		[Parameter(Mandatory)][psobject]$Spec,
-		[switch]$RemoveProfile, [switch]$Force
-	)
+	[CmdletBinding()] param( [Parameter(Mandatory)][psobject]$Spec, [switch]$RemoveProfile, [switch]$Force )
 	$drive = $Spec.Drive
 	if (-not (Test-ValidDrive $drive)) { return }
 	if (-not $Force) { if (-not ((Test-MapMutexOwned $Spec) -or (Test-DriveMatchesDesired $Spec))) { return } }
