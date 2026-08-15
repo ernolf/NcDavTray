@@ -29,6 +29,12 @@
 	deliverables read one shared pack per language, but neither has to carry the
 	other's strings in its compiled-in fallback.
 
+	A note is a comment marked with __note__ that belongs to the source and not
+	to the deliverable (see Remove-Notes for how one is written). The build
+	drops notes once the script is assembled, template and modules alike: last
+	of all, so a note may stand anywhere, and only notes -- every other comment
+	ships.
+
 	Usage:
 		tools\build.ps1            assemble build\NcDavTray
 #>
@@ -170,6 +176,42 @@ function Expand-I18n([string]$Text) {
 	return $I18nPlaceholderRx.Replace($Text, $evaluator)
 }
 
+# A note is written as "#__note__ <text>", which runs to the end of the line, or
+# opened with "<#__note__ <text>" and closed the way any block comment is closed,
+# which runs over as many lines as it takes. Both are ordinary comments, so an
+# editor, the parser and `make check` see them for what they are, and there is no
+# marker of its own that could be left unclosed.
+#
+# Notes are taken out by the parser rather than by a pattern over the text: a
+# '#' inside a string or a regex is not a comment, and no expression can tell
+# the two apart. Whatever is left of the line goes with the note, and a note
+# that had a line to itself takes the line with it, so nothing is left behind
+# where one stood. The script is assembled at this point, which is why a note in
+# a module and a note in the template are the same thing here.
+function Remove-Notes([string]$Text) {
+	$tokens = $null
+	$errors = $null
+	[void][System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$tokens, [ref]$errors)
+	if ($errors -and $errors.Count -gt 0) {
+		throw ("cannot read the assembled script: {0} (line {1})" -f $errors[0].Message, $errors[0].Extent.StartLineNumber)
+	}
+	$notes = @($tokens | Where-Object { $_.Kind -eq 'Comment' -and $_.Text -match '^<?#__note__' })
+	# from the back, so every offset still points where it did when it was read
+	for ($i = $notes.Count - 1; $i -ge 0; $i--) {
+		$from = $notes[$i].Extent.StartOffset
+		$to = $notes[$i].Extent.EndOffset
+		while ($from -gt 0 -and ($Text[$from - 1] -eq ' ' -or $Text[$from - 1] -eq "`t")) { $from-- }
+		$rest = $to
+		while ($rest -lt $Text.Length -and ($Text[$rest] -eq ' ' -or $Text[$rest] -eq "`t")) { $rest++ }
+		if (($from -eq 0 -or $Text[$from - 1] -eq "`n") -and ($rest -ge $Text.Length -or $Text[$rest] -eq "`n")) {
+			$to = [Math]::Min($rest + 1, $Text.Length)
+		}
+		$Text = $Text.Remove($from, $to - $from)
+	}
+	Write-Host ("         notes  {0} removed" -f $notes.Count)
+	return $Text
+}
+
 # The deliverables are Windows scripts and .gitattributes states as much for
 # every .ps1 in the repository. Until now git enforced that on checkout, but the
 # build output has left the repository, so the build has to state it itself --
@@ -183,7 +225,7 @@ if (Test-Path -LiteralPath $ProductDir) { Remove-Item -LiteralPath $ProductDir -
 [void](New-Item -ItemType Directory -Path $ProductDir -Force)
 
 foreach ($t in $Targets) {
-	$built = ConvertTo-Crlf (Expand-I18n (Expand-Template (Join-Path $RepoRoot $t.Template)))
+	$built = ConvertTo-Crlf (Remove-Notes (Expand-I18n (Expand-Template (Join-Path $RepoRoot $t.Template))))
 	$bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($built)
 	[System.IO.File]::WriteAllBytes((Join-Path $ProductDir $t.Output), $bytes)
 	Write-Host ("built    {0}  {1} bytes" -f $t.Output, $bytes.Length)
