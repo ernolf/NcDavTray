@@ -20,6 +20,14 @@
 		            protected on Form or Control cannot be reached from a script,
 		            and the call only fails when that window opens
 
+	And over the sources in modules\ and templates\:
+
+		style       the one line the code is written in: no line continued with
+		            a backtick, nothing padded to line up, tabs for indentation,
+		            no brace on a line of its own, no blank line at the end.
+		            Reported against the source, because that is where the line
+		            can be changed
+
 	And over the bootstrap in build\:
 
 		actions     every -Action Installer.cmd passes is one the script it calls
@@ -197,6 +205,63 @@ function Test-FormMembers($Ast) {
 	return , $problems
 }
 
+# The style is the one the single script of 1.2.2 established: compact, nothing
+# wrapped for width, nothing padded to line up. It reads tokens rather than
+# lines, and that is the whole point -- a here-string and a block comment are one
+# token each, they carry their own escaping and their own layout, and a pattern
+# over lines would report every one of them. What a note is marked with does not
+# matter here either: a note is a comment like any other, and the build is what
+# tells them apart.
+function Get-StyleProblems([string]$Path) {
+	$name = Split-Path -Leaf $Path
+	$text = [System.IO.File]::ReadAllText($Path, [System.Text.UTF8Encoding]::new($false)) -replace "`r`n", "`n"
+	$lines = $text -split "`n"
+	$tokens = $null
+	$errors = $null
+	$ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+	if ($errors -and $errors.Count -gt 0) {
+		return @{ Errors = @("{0}:{1}  {2}" -f $name, $errors[0].Extent.StartLineNumber, $errors[0].Message); Hints = @() }
+	}
+	# every line a token reaches into, which is where the tokenizer earns its keep
+	$inside = @{}
+	foreach ($t in $tokens) {
+		for ($i = $t.Extent.StartLineNumber + 1; $i -le $t.Extent.EndLineNumber; $i++) { $inside[$i] = $true }
+	}
+	$problems = @()
+	$previous = $null
+	foreach ($t in $tokens) {
+		if ($t.Kind -eq 'LineContinuation') {
+			$problems += ("{0}:{1}  line continued with a backtick" -f $name, $t.Extent.StartLineNumber)
+			# what follows is the same statement, and its indentation is not padding
+			$previous = $null
+			continue
+		}
+		if ($t.Kind -eq 'NewLine' -or $t.Kind -eq 'EndOfInput') { $previous = $null; continue }
+		if ($previous -and $previous.Extent.EndLineNumber -eq $t.Extent.StartLineNumber) {
+			$gap = $t.Extent.StartColumnNumber - $previous.Extent.EndColumnNumber
+			$token = $t.Text -replace "`n.*", '...'
+			if ($gap -gt 1) { $problems += ("{0}:{1}  {2} spaces before '{3}'" -f $name, $t.Extent.StartLineNumber, $gap, $token) }
+		}
+		$previous = $t
+	}
+	for ($i = 0; $i -lt $lines.Count; $i++) {
+		if ($inside.ContainsKey($i + 1)) { continue }
+		$line = $lines[$i]
+		if (-not $line.Trim()) { continue }
+		if ($line -match '^\t* ') { $problems += ("{0}:{1}  indented with spaces" -f $name, ($i + 1)) }
+		if ($line.Trim() -eq '{') { $problems += ("{0}:{1}  brace on a line of its own" -f $name, ($i + 1)) }
+	}
+	if ($text -match "\n[ \t]*\n+$") { $problems += ("{0}  blank line at the end" -f $name) }
+	# A param() over several lines is not always avoidable -- a comment between two
+	# parameters has nowhere else to go -- so this is said, not enforced.
+	$hints = @()
+	foreach ($p in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ParamBlockAst] }, $true)) {
+		$span = $p.Extent.EndLineNumber - $p.Extent.StartLineNumber + 1
+		if ($span -gt 1) { $hints += ("{0}:{1}  param() over {2} lines" -f $name, $p.Extent.StartLineNumber, $span) }
+	}
+	return @{ Errors = $problems; Hints = $hints }
+}
+
 # The values a script accepts for -Action, or $null when it does not take one.
 function Get-ActionValidateSet($Ast) {
 	if (-not $Ast.ParamBlock) { return $null }
@@ -240,6 +305,21 @@ foreach ($file in $Path) {
 	Write-Result $name 'i18n' (Test-I18nKeys $ast)
 	Write-Result $name 'members' (Test-FormMembers $ast)
 }
+
+# The only check that does not look at build\: a line number is worth something
+# where the line can be edited, and in the build every one of them has moved.
+$sources = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'modules') -Filter *.ps1)
+$sources += @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'templates') -Filter *.ps1.in)
+$styleProblems = @()
+$styleHints = @()
+foreach ($src in ($sources | Sort-Object Name)) {
+	$found = Get-StyleProblems $src.FullName
+	$styleProblems += $found.Errors
+	$styleHints += $found.Hints
+}
+$styleName = "{0} sources" -f $sources.Count
+Write-Result $styleName 'style' $styleProblems
+Write-Result $styleName 'style, worth a look' $styleHints -Warn
 
 # The bootstrap and the script it drives are two files that have to agree, and
 # nothing at runtime can tell them apart: an -Action the ValidateSet does not know
