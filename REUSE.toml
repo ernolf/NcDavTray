@@ -28,6 +28,15 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2025 - 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
+# The rest of tools/ carries its own header; this one is the exception because it
+# is read as strict JSON.
+
+[[annotations]]
+path = "tools/ascii-fold.json"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
 # Repository metadata: comment syntax exists in most of these, but a header would
 # be the larger part of the file.
 
