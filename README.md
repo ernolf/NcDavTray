@@ -24,9 +24,9 @@ Map your Nextcloud to a real Windows drive letter and keep it healthy. NcDavTray
 
 ## Features
 
-* **Any number of mounts** in one tray application — accounts and public `/s/…` share links
+* **Any number of mounts** in one tray application — Nextcloud accounts and public `/s/…` share links, mixed freely. Share links need no account of your own, so a Nextcloud of your own is not required at all
 * **Watchdog and auto-reconnect** — server offline or in maintenance, the drive is unmapped cleanly and remounted as soon as it is back
-* **Automatic file locking for Office applications**, which the official Nextcloud Desktop Client cannot do — see **[File locking](https://github.com/ernolf/NcDavTray/wiki/File-locking)**
+* **A real network drive, not a sync folder** — applications read and write on the server itself, which is what lets Office issue WebDAV locks against it. See **[File locking](https://github.com/ernolf/NcDavTray/wiki/File-locking)**
 * **Subfolder mapping**, custom Explorer label and an icon taken from your Nextcloud favicon
 * **Two security models** — DPAPI when installed, AES-256-CBC with PBKDF2 when portable
 * **WebClient tuning** and a **WebDAV cache** view for the Windows redirector behind it all
@@ -35,15 +35,15 @@ Map your Nextcloud to a real Windows drive letter and keep it healthy. NcDavTray
 
 ## Requirements
 
-* Windows 10 or 11 with **Windows PowerShell 5.1**
+* **Windows PowerShell 5.1** — present on Windows 10 and 11. On Windows Server the *WebDAV Redirector* feature has to be added first, see [#2](https://github.com/ernolf/NcDavTray/issues/2)
 * The **WebClient** service, set to *Manual* or *Automatic*
-* A Nextcloud reachable over **HTTPS**, and an **app password** for it
+* Something to mount over **HTTPS**: a Nextcloud account with an app password, or nothing more than a public share link somebody sent you
 
 ## Quick start
 
 1. Download the ZIP from [Releases](https://github.com/ernolf/NcDavTray/releases) and unpack it inside your user profile.
 2. Run `Installer.cmd` and pick **1** (installed) or **2** (portable).
-3. Right-click the tray icon → **Add account…** or **Add share link…**, choose a drive letter, save.
+3. Right-click the tray icon → **Add account…** or **Add share link…** and save. The next free drive letter is already filled in.
 
 Full walkthrough: **[Installation](https://github.com/ernolf/NcDavTray/wiki/Installation)** and **[Mounts](https://github.com/ernolf/NcDavTray/wiki/Mounts)**.
 
@@ -58,24 +58,13 @@ Full walkthrough: **[Installation](https://github.com/ernolf/NcDavTray/wiki/Inst
 | [Share links](https://github.com/ernolf/NcDavTray/wiki/Share-links) | public links as a drive, and what to do when one refuses |
 | [Server identities](https://github.com/ernolf/NcDavTray/wiki/Server-identities) | the Windows two-login limit and error 1219 |
 | [The tray](https://github.com/ernolf/NcDavTray/wiki/The-tray) | icons, shapes, colours and every menu entry |
-| [File locking](https://github.com/ernolf/NcDavTray/wiki/File-locking) | Office locking, `files_lock`, and the Desktop Client comparison |
+| [File locking](https://github.com/ernolf/NcDavTray/wiki/File-locking) | why a network drive locks and a sync folder does not, and what `files_lock` adds |
 | [WebClient service](https://github.com/ernolf/NcDavTray/wiki/WebClient-service) · [WebDAV cache](https://github.com/ernolf/NcDavTray/wiki/WebDAV-cache) | the Windows redirector: limits, timeouts, cache |
 | [Security and privacy](https://github.com/ernolf/NcDavTray/wiki/Security-and-privacy) | where passwords live, which hosts are contacted |
 | [Languages](https://github.com/ernolf/NcDavTray/wiki/Languages) · [Updates](https://github.com/ernolf/NcDavTray/wiki/Updates) | language packs, the update check |
-| [Build from source](https://github.com/ernolf/NcDavTray/wiki/Build-from-source) | the module tree, `make.cmd`, and how a release is assembled |
+| [Build from source](https://github.com/ernolf/NcDavTray/wiki/Build-from-source) | the module tree, `make.cmd`, the static checks, and how to contribute |
 
 Coming from version 1? See **[Differences between 1 and 2](https://github.com/ernolf/NcDavTray/wiki/Differences-between-1-and-2)**. The 1.x line ended with [v1.2.2](https://github.com/ernolf/NcDavTray/releases/tag/v1.2.2) and is documented in the README of that tag.
-
-## Building
-
-The repository holds sources; the script you run is assembled from them.
-
-```
-make.cmd            build and run the static checks
-make.cmd dist       build and pack the release archive
-```
-
-Windows PowerShell 5.1 is the only prerequisite. Details in **[Build from source](https://github.com/ernolf/NcDavTray/wiki/Build-from-source)**.
 
 ## License and credits
 
