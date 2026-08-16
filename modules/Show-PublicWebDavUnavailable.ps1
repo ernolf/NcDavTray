@@ -1,12 +1,12 @@
-# Says that the server, not the link, is what stands in the way, and offers the
+# Says that the server, not the link, is what stands in the way, and points at the
 # long version of it: which setting has to change, and who can change it. That
-# explanation is too long for the message itself and of no interest to anyone who
-# already knows what the switch is called.
+# explanation lives in the wiki, where it is written once instead of in every
+# language pack, and where it can be corrected without a release.
 function Show-PublicWebDavUnavailable {
 	[CmdletBinding()] param( [Parameter(Mandatory)][string]$Server )
 
 	$vars = @{ server = $Server }
-	$url = 'https://{0}/settings/admin/sharing' -f $Server
+	$url = '{0}/wiki/Share-links' -f $ProjectUrl
 	[System.Media.SystemSounds]::Exclamation.Play()
 
 	$frm = New-Object System.Windows.Forms.Form
@@ -44,7 +44,7 @@ function Show-PublicWebDavUnavailable {
 	$lnkMore = New-Object System.Windows.Forms.LinkLabel
 	$lnkMore.Text = (T 'link.more_info'); $lnkMore.AutoSize = $true
 	$lnkMore.Margin = New-Object System.Windows.Forms.Padding(44, 8, 0, 0)
-	$lnkMore.Add_LinkClicked({ [void](Show-HelpT -TitleKey 'title.public_webdav_unavailable' -BodyKey 'message.public_webdav_help' -BodyVars $vars -Url $url -Width 660 -Height 480 -Parent $frm) })
+	$lnkMore.Add_LinkClicked({ param($s, $e); try { $psi = New-Object System.Diagnostics.ProcessStartInfo; $psi.FileName = $url; $psi.UseShellExecute = $true; [System.Diagnostics.Process]::Start($psi) | Out-Null } catch {} })
 
 	$buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 	$buttonPanel.AutoSize = $true; $buttonPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
