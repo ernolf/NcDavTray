@@ -35,7 +35,7 @@ Map your Nextcloud to a real Windows drive letter and keep it healthy. NcDavTray
 
 ## Requirements
 
-* **Windows PowerShell 5.1** — present on Windows 10 and 11. On Windows Server the *WebDAV Redirector* feature has to be added first
+* **Windows PowerShell 5.1** — present on Windows 10 and 11. On Windows Server the [*WebDAV Redirector* feature has to be added first](https://github.com/ernolf/NcDavTray/wiki/Windows-Server)
 * The **WebClient** service, set to *Manual* or *Automatic*
 * Something to mount over **HTTPS**: a Nextcloud account with an app password, or nothing more than a public share link somebody sent you
 
