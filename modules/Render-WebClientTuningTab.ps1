@@ -67,30 +67,19 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 	$script:lblFSLCur.AutoSize = $true; $script:lblFSLCur.Top = $lblFSL.Top; $script:lblFSLCur.Left = $script:lblFALCur.Left; $script:lblFSLCur.Anchor = 'Top, Right'
 	$grpLim.Controls.AddRange(@($lblFAL, $numFiles, $lblFSL, $cmbFSL, $script:lblFALCur, $script:lblFSLCur))
 	$t.Controls.Add($grpLim)
-	# --- Group: Timeouts + zone ---
+	# --- Group: Timeouts ---
 	$grpTo = New-Object Windows.Forms.Panel; $grpTo.Left = 8; $grpTo.Top = $grpLim.Bottom + 8; $grpTo.Width = $t.ClientSize.Width - 16; $grpTo.Height = 150; $grpTo.Anchor = 'Top, Left, Right'
-	$lblSco = $script:LabelActiveScope = New-Object Windows.Forms.Label; $lblSco.Left = 4; $lblSco.Top = 0; $lblSco.AutoSize = $true; $lblSco.Visible = $false
-	$script:UpdateActiveScopeLabel = {
-		param($lbl)
-		# The zone is a property of one server. Which one that is -- if there is one
-		# at all -- only the program around this tab knows.
-		$server = Get-TuningServer
-		if ([string]::IsNullOrWhiteSpace($server)) { $lbl.Visible = $false; return }
-		# Unified status helper, so this is a Nextcloud server and not just a host
-		# that answers. Cached, because this tab is built before the window is shown
-		# and the shares list has asked the same host a moment earlier -- a server
-		# that does not answer charges a full timeout, and once is enough.
-		try { $st = Get-NcServerStatusCached $server } catch { $st = $null }
-		if (-not $st -or -not $st.Reachable -or -not $st.Installed) { $lbl.Visible = $false; return }
-		$zoneText = if ((Get-ServerScope $server) -eq 'Local') { (T 'label.active_scope_local') } else { (T 'label.active_scope_internet') }
-		$lbl.Text = (T 'label.active_scope' @{ zone = $zoneText })
-		$lbl.Visible = $true
-	}
+	# Measured, because Microsoft documents the two values but not the criterion: the
+	# redirector picks the timeout from the shape of the host name alone. A name without
+	# a dot is a local server, everything else, every FQDN and every IP address, is an
+	# internet server. The Windows security zone has no influence on this.
+	$lblSco = $script:LabelLocalTimeoutNote = New-Object Windows.Forms.Label; $lblSco.Text = (T 'label.local_timeout_note'); $lblSco.Left = 4; $lblSco.Top = 0; $lblSco.AutoSize = $true
+	if ($script:Tip) { $script:Tip.SetToolTip($lblSco, (T 'tip.local_timeout_note')) }
 	$lblLoc = $script:LabelLocalServerTimeout = New-Object Windows.Forms.Label; $lblLoc.Text = (T 'label.local_server_timeout'); $lblLoc.Left = 12; $lblLoc.Top = 30; $lblLoc.AutoSize = $true
 	$btnHelpLoc = $script:ButtonLocalServerTimeoutHelp = New-Object Windows.Forms.Button; $btnHelpLoc.Text = '?'; $btnHelpLoc.Width = 28; $btnHelpLoc.Left = $cmbBAL.Left + 80; $btnHelpLoc.Top = $lblLoc.Top - 6; $btnHelpLoc.Height = $script:ButtonH; $btnHelpLoc.Anchor = 'Top, Right'
 	if ($script:Tip) { $script:Tip.SetToolTip($btnHelpLoc, (T 'tip.local_server_timeout_help')) }
 	$btnHelpLoc.Add_Click({ $parent = $this.FindForm(); [void](Show-HelpT -TitleKey 'label.local_server_timeout' -BodyKey 'message.local_server_timeout_help' -Width 580 -Height 270 -Parent $parent) })
-	$numLoc = New-Object Windows.Forms.NumericUpDown; $numLoc.Left = $btnHelpLoc.Left + 32; $numLoc.Top = $lblLoc.Top - 2; $numLoc.Minimum = 5; $numLoc.Maximum = 600; $numLoc.Value = $v_LocalTimeoutInSec; $numLoc.Width = 80 - 32; $numLoc.Anchor = 'Top, Right'
+	$numLoc = $script:NumericLocalServerTimeout = New-Object Windows.Forms.NumericUpDown; $numLoc.Left = $btnHelpLoc.Left + 32; $numLoc.Top = $lblLoc.Top - 2; $numLoc.Minimum = 5; $numLoc.Maximum = 600; $numLoc.Value = $v_LocalTimeoutInSec; $numLoc.Width = 80 - 32; $numLoc.Anchor = 'Top, Right'
 	$lblInt = $script:LabelInternetServerTimeout = New-Object Windows.Forms.Label; $lblInt.Text = (T 'label.internet_server_timeout'); $lblInt.Left = 12; $lblInt.Top = 60; $lblInt.AutoSize = $true
 	$btnHelpInt = $script:ButtonInternetServerTimeoutHelp = New-Object Windows.Forms.Button; $btnHelpInt.Text = '?'; $btnHelpInt.Width = 28; $btnHelpInt.Left = $btnHelpLoc.Left; $btnHelpInt.Top = $lblInt.Top - 6; $btnHelpInt.Height = $script:ButtonH; $btnHelpInt.Anchor = 'Top, Right'
 	if ($script:Tip) { $script:Tip.SetToolTip($btnHelpInt, (T 'tip.internet_server_timeout_help')) }
@@ -122,10 +111,6 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 		$lblSR, $btnHelpSR, $numSR, $script:LabelSendReceiveTimeoutCur,
 		$lblC, $btnHelpC, $numC, $script:LabelServerNotFoundCacheLifeTimeCur
 	))
-	# Only once the tab is looked at: this asks the server, and the window holding
-	# it opens on a different tab. The label starts invisible, so one that is never
-	# entered shows nothing rather than something out of date.
-	$t.Add_Enter({ try { & $script:UpdateActiveScopeLabel $script:LabelActiveScope } catch { $script:LabelActiveScope.Visible = $false } })
 	$t.Controls.Add($grpTo)
 	# --- Group: WebClient service ---
 	$grpSvc = New-Object Windows.Forms.Panel; $grpSvc.Left = 8; $grpSvc.Top = $grpTo.Bottom + 8; $grpSvc.Width = $t.ClientSize.Width - 16; $grpSvc.Height = 78; $grpSvc.Anchor = 'Top, Left, Right'
@@ -390,6 +375,12 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 		if ($script:lblFALCur -and -not $script:lblFALCur.IsDisposed) { $v = & $raw 'FileAttributesLimitInBytes' $v_FileAttributesLimitInBytes $curNow; $script:lblFALCur.Text = & $fmt $v }
 		if ($script:lblFSLCur -and -not $script:lblFSLCur.IsDisposed) { $v = & $raw 'FileSizeLimitInBytes' $v_FileSizeLimitInBytes $curNow; $script:lblFSLCur.Text = & $fmt $v }
 		if ($script:LabelLocalServerTimeoutCur -and -not $script:LabelLocalServerTimeoutCur.IsDisposed) { $v = & $raw 'LocalServerTimeoutInSec' $v_LocalTimeoutInSec $curNow; $script:LabelLocalServerTimeoutCur.Text = & $fmt $v }
+		# The local timeout is dead weight unless a mount names a host without a dot, so
+		# the field is only offered when one does. Re-checked here because mounts can be
+		# added while this window stays open.
+		if ($script:NumericLocalServerTimeout -and -not $script:NumericLocalServerTimeout.IsDisposed) {
+			$script:NumericLocalServerTimeout.Enabled = [bool](@($State.Mounts) | Where-Object { $_ -and ([string]$_.Server) -and ([string]$_.Server -notmatch '\.') })
+		}
 		if ($script:LabelInternetServerTimeoutCur -and -not $script:LabelInternetServerTimeoutCur.IsDisposed) { $v = & $raw 'InternetServerTimeoutInSec' $v_InternetTimeoutInSec $curNow; $script:LabelInternetServerTimeoutCur.Text = & $fmt $v }
 		if ($script:LabelSendReceiveTimeoutCur -and -not $script:LabelSendReceiveTimeoutCur.IsDisposed) { $v = & $raw 'SendReceiveTimeoutInSec' $v_SendReceiveTimeoutInSec $curNow; $script:LabelSendReceiveTimeoutCur.Text = & $fmt $v }
 		if ($script:LabelServerNotFoundCacheLifeTimeCur -and -not $script:LabelServerNotFoundCacheLifeTimeCur.IsDisposed) { $v = & $raw 'ServerNotFoundCacheLifeTimeInSec' $v_NotFoundCacheLifetimeInSec $curNow; $script:LabelServerNotFoundCacheLifeTimeCur.Text = & $fmt $v }
@@ -445,8 +436,9 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 			$script:ComboBoxBasicAuthLevel = $null
 			$script:LabelFilesPerFolder = $null
 			$script:LabelFileSizeLimit = $null
-			$script:LabelActiveScope = $null
+			$script:LabelLocalTimeoutNote = $null
 			$script:LabelLocalServerTimeout = $null
+			$script:NumericLocalServerTimeout = $null
 			$script:LabelInternetServerTimeout = $null
 			$script:LabelSendReceiveTimeout = $null
 			$script:LabelServerNotFoundCacheLifeTime = $null

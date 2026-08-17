@@ -801,8 +801,6 @@ function Show-SettingsDialog {
 #__inc:modules/Uninstall-App.ps1__
 #__inc:modules/Render-SharesTab.ps1__
 #__inc:modules/Invoke-WebClientWriteBroker.ps1__
-#__inc:modules/Get-ServerScope.ps1__
-#__inc:modules/Get-TuningServer.ps1__
 #__inc:modules/Unmap-OwnDrives.ps1__
 #__inc:modules/Set-TrayServiceDeactivated.ps1__
 #__inc:modules/Invoke-WebClientServiceAction.ps1__
