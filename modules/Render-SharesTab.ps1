@@ -315,6 +315,7 @@ function Render-SharesTab {
 		& $setTxt $script:LabelBasicAuthLevel (T 'label.basic_auth_level')
 		& $setTxt $script:LabelFilesPerFolder (T 'label.file_attributes_limit')
 		& $setTxt $script:LabelFileSizeLimit (T 'label.file_size_limit')
+		& $setTxt $script:LabelLocalTimeoutNote (T 'label.local_timeout_note')
 		& $setTxt $script:LabelLocalServerTimeout (T 'label.local_server_timeout')
 		& $setTxt $script:LabelInternetServerTimeout (T 'label.internet_server_timeout')
 		& $setTxt $script:LabelSendReceiveTimeout (T 'label.send_receive_timeout')
@@ -340,6 +341,7 @@ function Render-SharesTab {
 		# force-refresh all tooltips to avoid stale cached strings
 		$script:Tip.RemoveAll()
 		& $setTip $script:ComboBoxBasicAuthLevel 'tip.basic_auth'
+		& $setTip $script:LabelLocalTimeoutNote 'tip.local_timeout_note'
 		& $setTip $script:ButtonLocalServerTimeoutHelp 'tip.local_server_timeout_help'
 		& $setTip $script:ButtonInternetServerTimeoutHelp 'tip.internet_server_timeout_help'
 		& $setTip $script:ButtonSendReceiveTimeoutHelp 'tip.send_receive_timeout_help'
@@ -374,8 +376,6 @@ function Render-SharesTab {
 		$lastState = $null
 		if ($script:LabelServiceStatus -and $script:LabelServiceStatus.Tag) { $lastState = [string]$script:LabelServiceStatus.Tag.State }
 		if ($script:SetWebClientStatusLabel -is [scriptblock] -and -not [string]::IsNullOrWhiteSpace($lastState)) { & $script:SetWebClientStatusLabel $lastState }
-		# re-render the zone label in the new language
-		if ($script:LabelActiveScope) { try { & $script:UpdateActiveScopeLabel $script:LabelActiveScope } catch { $script:LabelActiveScope.Visible = $false } }
 	}
 	# Click handler for language import
 	$script:ButtonLanguageImport.Add_Click({
