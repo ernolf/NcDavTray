@@ -1,6 +1,7 @@
 # NcDavTray - WebDAV / WebClient diagnostics
 # Read-only: collects environment info to debug "mapping failed" issues.
-# No server names or passwords are written to the report.
+# No password and no share token ever reaches the report; host and user names do
+# unless the anonymized profile is chosen at the prompt.
 
 # SPDX-FileCopyrightText: 2025 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -12,11 +13,23 @@ $HereDir      = Split-Path -Parent $PSCommandPath
 $ScriptFile   = ("{0}.ps1" -f $AppNameShort)
 $InstallDir   = Join-Path $env:LOCALAPPDATA $AppName
 $InstallBin   = Join-Path $InstallDir $ScriptFile
-$PortJson     = ("{0}_portable.json" -f $AppName)
+$PortJson     = ("{0}_config.json" -f $AppNameShort)
+# What a portable copy up to 1.2.2 wrote instead: one account, no mount list.
+$LegacyJson   = ("{0}_portable.json" -f $AppName)
 $SecretPath   = ("{0}_secret.dat" -f $AppNameShort)
 $RegBase      = ("HKCU:\Software\{0}" -f $AppName)
+$RegAccounts  = Join-Path $RegBase 'Accounts'
+$RegMounts    = Join-Path $RegBase 'Mounts'
 $RegMP2       = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2'
 $RegWebClient = 'HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters'
+# Shared state, keyed on the application name and therefore in the same place as
+# an installed copy: a portable copy keeps it here too, because processes and
+# their PIDs live per user session, not per folder.
+$StateDir      = $InstallDir
+$CacheStateDir = Join-Path $StateDir 'CacheAgent'
+$InstanceList  = Join-Path (Join-Path $StateDir 'Instances') 'instances.json'
+# The redirector's cache, in the profile of the LOCAL SERVICE account
+$CacheRoot     = Join-Path $env:WINDIR 'ServiceProfiles\LocalService\AppData\Local\Temp\TfsStore\Tfs_DAV'
 
 $ErrorActionPreference = 'SilentlyContinue'
 try {
@@ -31,6 +44,15 @@ $script:KnownWinUsers = @()
 $script:KnownNcUsers  = @()
 $script:KnownWinHosts = @()
 $script:KnownLabels   = @()
+# Folder names inside the user's cloud are as personal as the label, and the path
+# to a mount runs through the report in three spellings. What the report needs of
+# it is its shape, not its names.
+$script:KnownSubPaths = @()
+$script:SegNumbers    = @{}
+# A share token is not a name but a key: it grants access to the share on its own.
+# It is masked in every report, anonymized or not, which is why it is kept apart
+# from the lists above.
+$script:KnownTokens   = @()
 
 if ($env:USERNAME)     { $script:KnownWinUsers += $env:USERNAME }
 if ($env:COMPUTERNAME) { $script:KnownWinHosts += $env:COMPUTERNAME }
@@ -65,15 +87,38 @@ function New-StringBuilder {
 	return New-Object System.Text.StringBuilder
 }
 
+function Mask-Tokens {
+	param([string]$line)
+	if ([string]::IsNullOrEmpty($line)) { return $line }
+	$masked = $line
+	foreach ($tok in $script:KnownTokens) {
+		if ([string]::IsNullOrWhiteSpace($tok)) { continue }
+		$masked = [regex]::Replace($masked, [regex]::Escape($tok), '<SHARE_TOKEN(masked)>')
+	}
+	return $masked
+}
+
 function Add-Line {
 	param(
 		[System.Text.StringBuilder]$sb,
 		[string]$text = ''
 	)
-	if ($script:Anonymize -and $text) {
-		$text = Mask-InLine $text
-	}
 	[void]$sb.AppendLine($text)
+}
+
+# Masking runs over the finished report, not while it is written: a host, a user
+# or a token is only known once the configuration it comes from has been read, so
+# masking a line as it is composed would let every first occurrence through.
+# Tokens go always, anonymized report or not: they are keys, not names.
+function Mask-Report {
+	param([string]$text)
+	if ([string]::IsNullOrEmpty($text)) { return $text }
+	$lines = $text -split "`r?`n"
+	for ($i = 0; $i -lt $lines.Count; $i++) {
+		if ($script:KnownTokens.Count -gt 0) { $lines[$i] = Mask-Tokens $lines[$i] }
+		if ($script:Anonymize) { $lines[$i] = Mask-InLine $lines[$i] }
+	}
+	return ($lines -join [Environment]::NewLine)
 }
 
 function Add-Section {
@@ -85,46 +130,75 @@ function Add-Section {
 	Add-Line $sb ('===== {0} =====' -f $title)
 }
 
-function Get-NcDavTrayConfigsFromFolder {
+function New-ConfigRecord {
 	param(
-		[string]$Folder
+		[string]$Path,
+		[psobject]$Mount
+	)
+	if (-not $Mount) { return $null }
+	$kind = [string]$Mount.Kind
+	if (-not $kind) { $kind = 'account' }
+	$drive = [string]$Mount.Drive
+	if (-not $drive -and ($Mount.PSObject.Properties.Name -contains 'DriveLetter')) { $drive = [string]$Mount.DriveLetter }
+	$port = $false
+	try { $port = [bool]$Mount.ExplicitPort } catch {}
+	return [PSCustomObject]@{
+		Path         = $Path
+		Server       = [string]$Mount.Server
+		Kind         = $kind
+		Drive        = $drive
+		User         = [string]$Mount.User
+		Token        = [string]$Mount.Token
+		SubPath      = [string]$Mount.SubPath
+		Label        = [string]$Mount.Label
+		ExplicitPort = $port
+	}
+}
+
+# Since 2.0.0 a portable copy keeps every mount in one file, under Mounts. Up to
+# 1.2.2 the file held a single account in its top level, which is what the second
+# branch reads: a copy that has not been started by 2.x yet still looks like that.
+function Read-ConfigFile {
+	param(
+		[string]$Path
 	)
 	$result = @()
-	if (-not (Test-Path $Folder)) { return $result }
-
+	if (-not (Test-Path -LiteralPath $Path)) { return $result }
+	$cfg = $null
 	try {
-		$jsonFiles = Get-ChildItem -Path $Folder -Filter '*.json' -ErrorAction SilentlyContinue
-		foreach ($file in $jsonFiles) {
-			try {
-				$raw = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop
-				if ([string]::IsNullOrWhiteSpace($raw)) { continue }
-
-				$cfg = $raw | ConvertFrom-Json -ErrorAction Stop
-				if (-not $cfg) { continue }
-
-				# Only treat JSON files as NcDavTray config if they have a non-empty Server field
-				if (-not $cfg.Server) { continue }
-
-				$driveVal = $cfg.Drive
-				if (-not $driveVal) { $driveVal = $cfg.DriveLetter }
-
-				$result += [PSCustomObject]@{
-					Path    = $file.FullName
-					Server  = $cfg.Server
-					Drive   = $driveVal
-					User    = $cfg.User
-					SubPath = $cfg.SubPath
-					Label   = $cfg.Label
-				}
-			} catch {
-				# ignore malformed JSON or unexpected content
-			}
-		}
+		$raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+		if ([string]::IsNullOrWhiteSpace($raw)) { return $result }
+		$cfg = $raw | ConvertFrom-Json -ErrorAction Stop
 	} catch {
-		# best-effort: return whatever we collected so far
+		return $result
 	}
-
+	if (-not $cfg) { return $result }
+	$have = $cfg.PSObject.Properties.Name
+	if ($have -contains 'Mounts') {
+		foreach ($m in @($cfg.Mounts)) {
+			$rec = New-ConfigRecord -Path $Path -Mount $m
+			if ($rec -and $rec.Server) { $result += $rec }
+		}
+		return $result
+	}
+	if ($cfg.Server) {
+		$rec = New-ConfigRecord -Path $Path -Mount $cfg
+		if ($rec) { $result += $rec }
+	}
 	return $result
+}
+
+# The settings that sit beside the mount list, in both storage forms
+function Add-SettingsLines {
+	param(
+		[System.Text.StringBuilder]$sb,
+		[psobject]$Source
+	)
+	if (-not $Source) { return }
+	$have = $Source.PSObject.Properties.Name
+	foreach ($n in @('IntervalS', 'LangPref', 'TrayIcons', 'UpdateCheck')) {
+		if ($have -contains $n) { Add-Line $sb ("  {0}: {1}" -f $n, $Source.$n) }
+	}
 }
 
 function Normalize-SubPath([string]$sp) {
@@ -135,10 +209,84 @@ function Normalize-SubPath([string]$sp) {
 	return ($parts -join '/')
 }
 
-function Build-Unc([string]$server, [string]$user, [string]$sub) {
-	$norm   = Normalize-SubPath $sub
-	$suffix = if ($norm) { '\' + ($norm -replace '/', '\') } else { '' }
-	return "\\$server@ssl\remote.php\dav\files\$user$suffix"
+# Host part, path segments, UNC path and MountPoints2 key names are built the way
+# NcDavTray builds them (Get-MountHostPart, Get-MountPathSegments, Get-MP2KeyNames).
+# An explicit port is part of the host string and therefore part of the identity
+# the redirector keys its session on, so a check that leaves it out compares a
+# healthy mount against a path it was never mapped under.
+function Build-HostPart([psobject]$cfg) {
+	if ($cfg.ExplicitPort) { return ('{0}@ssl@443' -f $cfg.Server) }
+	return ('{0}@ssl' -f $cfg.Server)
+}
+
+function Build-PathSegments([psobject]$cfg) {
+	$segs = switch ($cfg.Kind) {
+		'share'        { @('public.php', 'dav', 'files', $cfg.Token) }
+		'share-legacy' { @('public.php', 'webdav') }
+		default        { @('remote.php', 'dav', 'files', $cfg.User) }
+	}
+	$norm = Normalize-SubPath $cfg.SubPath
+	if ($norm) { $segs += ($norm -split '/') }
+	return , $segs
+}
+
+function Build-Unc([psobject]$cfg) {
+	$segs = Build-PathSegments $cfg
+	return ('\\{0}\{1}' -f (Build-HostPart $cfg), ($segs -join '\'))
+}
+
+function Build-Mp2Names([psobject]$cfg) {
+	$hostPart = Build-HostPart $cfg
+	$path     = (Build-PathSegments $cfg) -join '#'
+	return @(
+		('##{0}#{1}' -f $hostPart, $path),
+		('##{0}#DavWWWRoot#{1}' -f $hostPart, $path)
+	)
+}
+
+# What a mount needs before a path can be built from it at all
+function Test-ConfigMappable([psobject]$cfg) {
+	if (-not $cfg.Server) { return $false }
+	switch ($cfg.Kind) {
+		'share'        { return [bool]$cfg.Token }
+		'share-legacy' { return $true }
+		default        { return [bool]$cfg.User }
+	}
+}
+
+# One number per distinct folder name, held for the whole report, so that two lines
+# naming the same folder still look alike. A segment that is also a label keeps the
+# label placeholder, which is what shows that the two are the same name.
+function Get-SegmentPlaceholder([string]$seg) {
+	foreach ($lbl in $script:KnownLabels) {
+		if ($lbl -and [string]::Equals($lbl, $seg, 'OrdinalIgnoreCase')) { return '<LABEL(anonymized)>' }
+	}
+	$key = $seg.ToLowerInvariant()
+	if (-not $script:SegNumbers.ContainsKey($key)) { $script:SegNumbers[$key] = $script:SegNumbers.Count + 1 }
+	return ('<PATH{0}(anonymized)>' -f $script:SegNumbers[$key])
+}
+
+# Only the connected path is replaced, in each of the three separators it appears
+# with, and only where a path ends: a mount's subfolder is always the tail of the
+# path it sits in. Without that anchor a folder named dav, Temp or Windows would
+# take apart every path in the report that happens to contain the word.
+function Mask-SubPaths {
+	param([string]$line)
+	if ([string]::IsNullOrEmpty($line) -or $script:KnownSubPaths.Count -eq 0) { return $line }
+	$masked = $line
+	# Longest first, so a deeper path is not half-replaced by one of its parents
+	foreach ($sp in ($script:KnownSubPaths | Select-Object -Unique | Sort-Object -Property Length -Descending)) {
+		$segs = @($sp -split '/')
+		$repl = @($segs | ForEach-Object { Get-SegmentPlaceholder $_ })
+		foreach ($sep in @('/', '\', '#')) {
+			# Preceded by a separator or an assignment, followed by the end of the
+			# path: end of line, whitespace, a quote, or the trailing separator a
+			# MountPoints2 key name carries.
+			$pattern = ('(?<=[=/\\#]){0}(?=[/\\#]?(\s|$|"))' -f [regex]::Escape(($segs -join $sep)))
+			$masked  = [regex]::Replace($masked, $pattern, ($repl -join $sep), [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+		}
+	}
+	return $masked
 }
 
 function Mask-InLine {
@@ -146,6 +294,10 @@ function Mask-InLine {
 	if ([string]::IsNullOrEmpty($line)) { return $line }
 
 	$masked = $line
+
+	# Paths go first: once a single segment has been replaced on its own, the path
+	# around it can no longer be recognized as one.
+	$masked = Mask-SubPaths $masked
 
 	# Windows hosts / domains (machine name, USERDOMAIN)
 	if ($script:KnownWinHosts -and $script:KnownWinHosts.Count -gt 0) {
@@ -224,7 +376,7 @@ function Select-PortableFolder {
 		Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
 	} catch {
 		Write-Host "Folder selection dialog not available, please enter the folder path manually." -ForegroundColor Yellow
-		return (Read-Host "Enter portable folder (where *_portable.json and *_secret.dat live)")
+		return (Read-Host ("Enter portable folder (where {0} and {1} live)" -f $PortJson, $SecretPath))
 	}
 
 	$initial = $HOME
@@ -234,7 +386,7 @@ function Select-PortableFolder {
 	}
 
 	$dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-	$dlg.Description        = "Select NcDavTray portable folder (where *_portable.json and *_secret.dat live)"
+	$dlg.Description        = ("Select {0} portable folder (where {1} and {2} live)" -f $AppName, $PortJson, $SecretPath)
 	$dlg.ShowNewFolderButton = $false
 	if (-not [string]::IsNullOrWhiteSpace($initial)) {
 		$dlg.SelectedPath = $initial
@@ -360,43 +512,32 @@ switch ($mode) {
 				} else {
 					Add-Line $sb ("{0} found: no" -f $ScriptFile)
 				}
+				# An installed copy keeps its configuration in the registry. A JSON file
+				# in here is therefore a leftover, and worth naming as one.
 				$jsonFiles = Get-ChildItem -Path $InstallDir -Filter '*.json' -ErrorAction SilentlyContinue
 				if ($jsonFiles) {
-					Add-Line $sb ("Config JSON files: {0}" -f (($jsonFiles | Select-Object -Expand FullName) -join '; '))
+					Add-Line $sb ("Unexpected JSON files in install dir: {0}" -f (($jsonFiles | Select-Object -Expand FullName) -join '; '))
 				} else {
-					Add-Line $sb "Config JSON files: none"
-				}
-				# Try to load NcDavTray configs and collect host / drive info (without leaking host names)
-				$configs = Get-NcDavTrayConfigsFromFolder -Folder $InstallDir
-				if ($configs -and $configs.Count -gt 0) {
-					$script:Configs += $configs
-					Add-Line $sb ("Configs with server info: {0}" -f $configs.Count)
-					foreach ($cfg in $configs) {
-						if ($cfg.Server) {
-							$script:KnownHosts += $cfg.Server
-							Add-Line $sb ("  Server: {0}" -f $cfg.Server)
-						}
-						if ($cfg.Drive) {
-							$script:KnownDrives += $cfg.Drive
-							Add-Line $sb ("  Drive: {0}" -f $cfg.Drive)
-						}
-						if ($cfg.User) {
-							$script:KnownNcUsers += $cfg.User
-						}
-						if ($cfg.Label) {
-							$script:KnownLabels += $cfg.Label
-						}
-					}
-				} else {
-					Add-Line $sb "Configs with server info: none"
+					Add-Line $sb "Unexpected JSON files in install dir: none"
 				}
 				# Installed mode: read the shared mount list (no secrets, no host leakage)
 				try {
 					if (Test-Path $RegBase) {
 						Add-Line $sb "Installed config found in registry."
-						$regMounts = Join-Path $RegBase 'Mounts'
+						try { Add-SettingsLines $sb (Get-ItemProperty -Path $RegBase -ErrorAction Stop) } catch {}
+						# The passwords of an installed copy: one DPAPI blob per server/user
+						# pair, shared by every mount of that pair. Only the names are read,
+						# and of those only whether one matches the mount at hand.
+						$accountNames = @()
+						if (Test-Path $RegAccounts) {
+							try {
+								$acc = Get-ItemProperty -Path $RegAccounts -ErrorAction Stop
+								$accountNames = @($acc.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | Select-Object -Expand Name)
+							} catch { Add-Line $sb "  Accounts key: unreadable" }
+						}
+						Add-Line $sb ("  Stored account passwords: {0}" -f $accountNames.Count)
 						$mountKeys = @()
-						if (Test-Path $regMounts) { $mountKeys = @(Get-ChildItem -Path $regMounts -ErrorAction SilentlyContinue) }
+						if (Test-Path $RegMounts) { $mountKeys = @(Get-ChildItem -Path $RegMounts -ErrorAction SilentlyContinue) }
 						Add-Line $sb ("  Mounts in list: {0}" -f $mountKeys.Count)
 						foreach ($mk in $mountKeys) {
 							$m = $null
@@ -410,51 +551,27 @@ switch ($mode) {
 							$drv = & $val 'Drive'
 							$usr = & $val 'User'
 							$lbl = & $val 'Label'
+							$tok = & $val 'Token'
 							Add-Line $sb ("      Server: {0}" -f $(if ($srv) { $srv } else { '<not set>' }))
 							Add-Line $sb ("      Drive: {0}" -f $(if ($drv) { $drv } else { '<not set>' }))
 							# A share is named by a token that grants access, so only its presence is reported
-							Add-Line $sb ("      Token set: {0}" -f $(if (& $val 'Token') { 'yes' } else { 'no' }))
-							Add-Line $sb ("      Password stored: {0}" -f $(if (& $val 'EncPass') { 'yes' } else { 'no' }))
+							Add-Line $sb ("      Token set: {0}" -f $(if ($tok) { 'yes' } else { 'no' }))
+							if ($usr -and $srv) {
+								$key = ('{0}|{1}' -f $srv.Trim().ToLowerInvariant(), $usr.Trim())
+								Add-Line $sb ("      Password stored for this account: {0}" -f $(if ($accountNames -contains $key) { 'yes' } else { 'no' }))
+							}
 							if ($has -contains 'ExplicitPort') { Add-Line $sb ("      Explicit port: {0}" -f [bool][int]$m.ExplicitPort) }
 							if ($has -contains 'Enabled') { Add-Line $sb ("      Enabled: {0}" -f [bool][int]$m.Enabled) }
+							if ($has -contains 'Order') { Add-Line $sb ("      Order: {0}" -f [int]$m.Order) }
 							if ($srv) { $script:KnownHosts += $srv }
 							if ($drv) { $script:KnownDrives += $drv }
 							if ($usr) { $script:KnownNcUsers += $usr }
 							if ($lbl) { $script:KnownLabels += $lbl }
-							$script:Configs += [PSCustomObject]@{
-								Path    = ("Registry:{0}\{1}" -f $regMounts, $mk.PSChildName)
-								Server  = $srv
-								Drive   = $drv
-								User    = $usr
-								SubPath = (& $val 'SubPath')
-								Label   = $lbl
-							}
-						}
-						# Which program manages which entry, and which migrations have run. Both are
-						# what an unexpectedly empty configuration is diagnosed from.
-						$regOwners = Join-Path $RegBase 'Owners'
-						if (Test-Path $regOwners) {
-							try {
-								$own = Get-ItemProperty -Path $regOwners -ErrorAction Stop
-								foreach ($p in $own.PSObject.Properties) {
-									if ($p.Name -like 'PS*') { continue }
-									Add-Line $sb ("  Owner {0}: {1}" -f $p.Name, $p.Value)
-								}
-							} catch { Add-Line $sb "  Owners: unreadable" }
-						} else {
-							Add-Line $sb "  Owners: none"
-						}
-						$regMig = Join-Path $RegBase 'Migrations'
-						if (Test-Path $regMig) {
-							try {
-								$mig = Get-ItemProperty -Path $regMig -ErrorAction Stop
-								foreach ($p in $mig.PSObject.Properties) {
-									if ($p.Name -like 'PS*') { continue }
-									Add-Line $sb ("  Migration {0}: {1}" -f $p.Name, $p.Value)
-								}
-							} catch { Add-Line $sb "  Migrations: unreadable" }
-						} else {
-							Add-Line $sb "  Migrations: none"
+							if ($tok) { $script:KnownTokens += $tok }
+							$sub = Normalize-SubPath (& $val 'SubPath')
+							if ($sub) { $script:KnownSubPaths += $sub }
+							$rec = New-ConfigRecord -Path ("Registry:{0}\{1}" -f $RegMounts, $mk.PSChildName) -Mount $m
+							if ($rec) { $script:Configs += $rec }
 						}
 						# Left over from before 2.0.0, when a single account lived directly in this
 						# key. The migration copies them into the list and leaves them in place.
@@ -466,6 +583,10 @@ switch ($mode) {
 								if ($flat.PSObject.Properties.Name -contains 'Drive' -and $flat.Drive) { $script:KnownDrives += $flat.Drive }
 								if ($flat.PSObject.Properties.Name -contains 'User' -and $flat.User) { $script:KnownNcUsers += $flat.User }
 								if ($flat.PSObject.Properties.Name -contains 'Label' -and $flat.Label) { $script:KnownLabels += $flat.Label }
+								if ($flat.PSObject.Properties.Name -contains 'SubPath' -and $flat.SubPath) {
+									$flatSub = Normalize-SubPath $flat.SubPath
+									if ($flatSub) { $script:KnownSubPaths += $flatSub }
+								}
 							}
 						} catch {}
 					} else {
@@ -490,77 +611,53 @@ switch ($mode) {
 			Add-Line $sb ("Portable folder: {0} (NOT found)" -f $portableRoot)
 		} else {
 			Add-Line $sb ("Portable folder: {0}" -f $portableRoot)
+			$configPath = Join-Path $portableRoot $PortJson
+			$legacyPath = Join-Path $portableRoot $LegacyJson
+			$secretFile = Join-Path $portableRoot $SecretPath
+			$readFrom   = ''
 			try {
-				$portableJson = Get-ChildItem -Path $portableRoot -Filter $PortJson   -ErrorAction SilentlyContinue
-				$secretFiles  = Get-ChildItem -Path $portableRoot -Filter $SecretPath -ErrorAction SilentlyContinue
-				if ($portableJson) {
-					Add-Line $sb ("Portable config JSON: {0}" -f (($portableJson | Select-Object -Expand FullName) -join '; '))
-				} else {
-					Add-Line $sb "Portable config JSON: none"
-				}
-				if ($secretFiles) {
-					Add-Line $sb ("Secret data files: {0}" -f (($secretFiles | Select-Object -Expand FullName) -join '; '))
-				} else {
-					Add-Line $sb "Secret data files: none"
-				}
+				Add-Line $sb ("{0}: {1}" -f $PortJson, $(if (Test-Path -LiteralPath $configPath) { 'found' } else { 'none' }))
+				# A copy that has not been started by 2.x yet still has only this one
+				Add-Line $sb ("{0}: {1}" -f $LegacyJson, $(if (Test-Path -LiteralPath $legacyPath) { 'found (pre-2.0.0)' } else { 'none' }))
+				Add-Line $sb ("{0}: {1}" -f $SecretPath, $(if (Test-Path -LiteralPath $secretFile) { 'found' } else { 'none' }))
 			} catch {
 				Add-Line $sb "Failed to inspect portable folder."
 			}
 
-			# Load NcDavTray portable config(s) from *_portable.json (exact schema as shown)
 			$portableConfigs = @()
-			if ($portableJson) {
-				foreach ($file in $portableJson) {
-					try {
-						$raw = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop
-						if ([string]::IsNullOrWhiteSpace($raw)) { continue }
-
-						$cfg = $raw | ConvertFrom-Json -ErrorAction Stop
-						if (-not $cfg) { continue }
-
-						# Expecting keys: SubPath, Server, Label, LangPref, IntervalS, Drive, User
-						if (-not $cfg.Server) { continue }
-
-						$driveVal = $cfg.Drive
-						if (-not $driveVal -and $cfg.PSObject.Properties.Name -contains 'DriveLetter') {
-							$driveVal = $cfg.DriveLetter
-						}
-
-						$portableConfigs += [PSCustomObject]@{
-							Path    = $file.FullName
-							Server  = $cfg.Server
-							Drive   = $driveVal
-							User    = $cfg.User
-							SubPath = $cfg.SubPath
-							Label   = $cfg.Label
-						}
-					} catch {
-						# ignore malformed JSON
-					}
-				}
+			if (Test-Path -LiteralPath $configPath) {
+				$readFrom = $configPath
+			} elseif (Test-Path -LiteralPath $legacyPath) {
+				$readFrom = $legacyPath
+			}
+			if ($readFrom) {
+				$portableConfigs = @(Read-ConfigFile -Path $readFrom)
+				try {
+					$rawCfg = (Get-Content -LiteralPath $readFrom -Raw -ErrorAction Stop) | ConvertFrom-Json -ErrorAction Stop
+					Add-SettingsLines $sb $rawCfg
+				} catch {}
 			}
 
-			if ($portableConfigs -and $portableConfigs.Count -gt 0) {
+			if ($portableConfigs.Count -gt 0) {
 				$script:Configs += $portableConfigs
-				Add-Line $sb ("Configs with server info: {0}" -f $portableConfigs.Count)
+				Add-Line $sb ("Mounts in list: {0}" -f $portableConfigs.Count)
 				foreach ($cfg in $portableConfigs) {
-					if ($cfg.Server) {
-						$script:KnownHosts += $cfg.Server
-						Add-Line $sb ("  Server: {0}" -f $cfg.Server)
-					}
-					if ($cfg.Drive) {
-						$script:KnownDrives += $cfg.Drive
-						Add-Line $sb ("  Drive: {0}" -f $cfg.Drive)
-					}
-					if ($cfg.User) {
-						$script:KnownNcUsers += $cfg.User
-					}
-					if ($cfg.Label) {
-						$script:KnownLabels += $cfg.Label
-					}
+					Add-Line $sb ("  - kind: {0}" -f $cfg.Kind)
+					Add-Line $sb ("      Server: {0}" -f $(if ($cfg.Server) { $cfg.Server } else { '<not set>' }))
+					Add-Line $sb ("      Drive: {0}" -f $(if ($cfg.Drive) { $cfg.Drive } else { '<not set>' }))
+					# A share is named by a token that grants access, so only its presence is reported
+					Add-Line $sb ("      Token set: {0}" -f $(if ($cfg.Token) { 'yes' } else { 'no' }))
+					Add-Line $sb ("      Explicit port: {0}" -f $cfg.ExplicitPort)
+					if ($cfg.Server) { $script:KnownHosts += $cfg.Server }
+					if ($cfg.Drive)  { $script:KnownDrives += $cfg.Drive }
+					if ($cfg.User)   { $script:KnownNcUsers += $cfg.User }
+					if ($cfg.Label)  { $script:KnownLabels += $cfg.Label }
+					if ($cfg.Token)  { $script:KnownTokens += $cfg.Token }
+					$sub = Normalize-SubPath $cfg.SubPath
+					if ($sub) { $script:KnownSubPaths += $sub }
 				}
 			} else {
-				Add-Line $sb "Configs with server info: none"
+				Add-Line $sb "Mounts in list: none"
 			}
 		}
 	}
@@ -628,6 +725,91 @@ try {
 	Add-Line $sb ("Failed to read registry path: {0}" -f $RegWebClient)
 }
 
+# ---------- WebDAV cache and cache watcher ----------
+Add-Section $sb 'WebDAV cache / cache watcher'
+
+# The cache itself belongs to the LOCAL SERVICE account, so an unelevated run can
+# see the directory but not read it. That is the normal case, not a fault, and the
+# watcher is the elevated helper that reports on it instead. The report therefore
+# names counts and sizes only: file names in this cache are file names from the
+# server, and they are none of a report's business.
+try {
+	Add-Line $sb ("Cache root: {0}" -f $CacheRoot)
+	if (Test-Path -LiteralPath $CacheRoot) {
+		Add-Line $sb "Cache root exists: yes"
+		$readable = $false
+		try {
+			Get-ChildItem -LiteralPath $CacheRoot -Force -ErrorAction Stop | Out-Null
+			$readable = $true
+		} catch {}
+		Add-Line $sb ("Readable from this process: {0} (elevation required)" -f $readable)
+	} else {
+		Add-Line $sb "Cache root exists: no"
+	}
+
+	$statePath = Join-Path $CacheStateDir 'state.json'
+	$cmdPath   = Join-Path $CacheStateDir 'command.json'
+	Add-Line $sb ("Agent state dir: {0}" -f $CacheStateDir)
+	if (Test-Path -LiteralPath $statePath) {
+		try {
+			$st = (Get-Content -LiteralPath $statePath -Raw -ErrorAction Stop) | ConvertFrom-Json -ErrorAction Stop
+			$stamp = [datetime]::MinValue
+			$ageOk = [datetime]::TryParse([string]$st.TimestampUtc, [ref]$stamp)
+			if ($ageOk) {
+				Add-Line $sb ("state.json age: {0:N0} s" -f ((Get-Date).ToUniversalTime() - $stamp.ToUniversalTime()).TotalSeconds)
+			} else {
+				Add-Line $sb "state.json age: <no timestamp>"
+			}
+			if ($st.Snapshot) {
+				Add-Line $sb ("  Cache files: {0}" -f $st.Snapshot.FileCount)
+				Add-Line $sb ("  Cache size: {0:N0} bytes" -f [int64]$st.Snapshot.TotalBytes)
+				Add-Line $sb ("  Oldest entry (UTC): {0}" -f $(if ($st.Snapshot.OldestWriteTimeUtc) { $st.Snapshot.OldestWriteTimeUtc } else { '<none>' }))
+				Add-Line $sb ("  Newest entry (UTC): {0}" -f $(if ($st.Snapshot.NewestWriteTimeUtc) { $st.Snapshot.NewestWriteTimeUtc } else { '<none>' }))
+			}
+			if ($st.LastAction) { Add-Line $sb ("  Last action: {0}" -f $st.LastAction) }
+			if ($st.LastError)  { Add-Line $sb ("  Last error: {0}" -f $st.LastError) }
+		} catch {
+			Add-Line $sb "state.json: unreadable or malformed"
+		}
+	} else {
+		# The agent removes it on the way out, so its absence is the normal resting state
+		Add-Line $sb "state.json: none (no watcher running)"
+	}
+	# A command waits here only between two ticks of the agent; one that stays is
+	# a command nobody picked up.
+	Add-Line $sb ("command.json pending: {0}" -f (Test-Path -LiteralPath $cmdPath))
+
+	Add-Line $sb ("Instance list: {0}" -f $InstanceList)
+	if (Test-Path -LiteralPath $InstanceList) {
+		try {
+			$entries = @((Get-Content -LiteralPath $InstanceList -Raw -ErrorAction Stop) | ConvertFrom-Json -ErrorAction Stop)
+			$aliveUi = 0
+			$aliveWatcher = 0
+			$stale = 0
+			foreach ($e in $entries) {
+				$pidValue = 0
+				try { $pidValue = [int]$e.Pid } catch {}
+				$running = $false
+				if ($pidValue -gt 0) {
+					try { $running = [bool](Get-Process -Id $pidValue -ErrorAction Stop) } catch {}
+				}
+				if (-not $running) { $stale++; continue }
+				switch ([string]$e.Role) {
+					'Ui'      { $aliveUi++ }
+					'Watcher' { $aliveWatcher++ }
+				}
+			}
+			Add-Line $sb ("  Entries: {0} (UI alive: {1}, watcher alive: {2}, stale: {3})" -f $entries.Count, $aliveUi, $aliveWatcher, $stale)
+		} catch {
+			Add-Line $sb "  Instance list: unreadable or malformed"
+		}
+	} else {
+		Add-Line $sb "  Instance list: none"
+	}
+} catch {
+	Add-Line $sb "Failed to inspect the WebDAV cache state."
+}
+
 # ---------- Mapped drives (net use) ----------
 Add-Section $sb 'Mapped drives (net use)'
 
@@ -683,11 +865,12 @@ if (-not $script:Configs -or $script:Configs.Count -eq 0) {
 			$drive   = $cfg.Drive
 			$subPath = $cfg.SubPath
 			$label   = $cfg.Label
+			$mappable = Test-ConfigMappable $cfg
 
-			Add-Line $sb ("Config: Server={0} User={1} Drive={2} SubPath={3}" -f $server, $user, $drive, $subPath)
+			Add-Line $sb ("Config: Server={0} Kind={1} User={2} Drive={3} SubPath={4}" -f $server, $cfg.Kind, $user, $drive, $subPath)
 
-			if ($server -and $user) {
-				$unc = Build-Unc $server $user $subPath
+			if ($mappable) {
+				$unc = Build-Unc $cfg
 				Add-Line $sb ("  Expected UNC: {0}" -f $unc)
 
 				if ($netDrives -and $drive) {
@@ -703,16 +886,11 @@ if (-not $script:Configs -or $script:Configs.Count -eq 0) {
 					Add-Line $sb "  Skipping UNC/provider check (no drive or no CIM data)."
 				}
 			} else {
-				Add-Line $sb "  Skipping UNC/provider check (missing server or user)."
+				Add-Line $sb "  Skipping UNC/provider check (config incomplete for its kind)."
 			}
 
-			if ($mp2Exists -and $server -and $user -and $label) {
-				$norm  = Normalize-SubPath $subPath
-				$frag  = if ($norm) { '#' + ($norm -replace '/', '#') } else { '' }
-				$names = @(
-					"##$server@ssl#remote.php#dav#files#$user$frag",
-					"##$server@ssl#DavWWWRoot#remote.php#dav#files#$user$frag"
-				)
+			if ($mp2Exists -and $mappable -and $label) {
+				$names = Build-Mp2Names $cfg
 
 				$labelOk = $false
 				foreach ($name in $names) {
@@ -743,7 +921,7 @@ if (-not $script:Configs -or $script:Configs.Count -eq 0) {
 				}
 				Add-Line $sb ("  Label matches config.Label: {0}" -f $labelOk)
 			} else {
-				Add-Line $sb "  Skipping MountPoints2 label check (missing key, server, user or label)."
+				Add-Line $sb "  Skipping MountPoints2 label check (missing key, incomplete config or no label)."
 			}
 			# Explorer drive icon branding (HKCU\Software\Classes\Applications\Explorer.exe\Drives\<X>\DefaultIcon)
 			if ($drive -and $drive -match '^[A-Za-z]:$') {
@@ -980,7 +1158,7 @@ try {
 	}
 
 	$outFile = Join-Path $baseDir ("NcDavTray_diag_{0}.txt" -f $ts)
-	$text = $sb.ToString()
+	$text = Mask-Report $sb.ToString()
 	$text | Out-File -LiteralPath $outFile -Encoding UTF8
 	Add-Line $sb ("Report file: {0}" -f $outFile)
 } catch {
@@ -995,7 +1173,7 @@ if ($outFile) {
 	Write-Host "Use this diagnostics report when you create an issue on GitHub."
 } else {
 	Write-Host "Diagnostics finished, but could not write the report file." -ForegroundColor Yellow
-	Write-Host "Below is the raw output:"
+	Write-Host "Below is the output:"
 	Write-Host ""
-	Write-Output ($sb.ToString())
+	Write-Output (Mask-Report $sb.ToString())
 }
