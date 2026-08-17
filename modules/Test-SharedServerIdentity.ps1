@@ -3,9 +3,12 @@
 # connection already carries joins that connection instead of needing a place of
 # its own -- error 1219 is about a second, different login, not about a second
 # drive on the same one.
-# The same means: same host, same port variant, same kind and same identity. Those
-# four decide the login and the password together, and anything less than all four
-# is a different connection.
+# The same means: same host, same port variant, same kind and same login name --
+# not the same identity. The login name is what the credentials are made of, and a
+# public share without a password does not put its token in there: it signs in as
+# 'anonymous' and carries the token in the path, so all of them on one host present
+# the same credentials and ride on one connection. A protected share goes over the
+# legacy endpoint, where the token is the login name, and takes a place of its own.
 # HeldBy names the drives that hold the identities in question, so an entry that is
 # merely configured counts for nothing -- there has to be a connection to join.
 function Test-SharedServerIdentity {
@@ -17,7 +20,7 @@ function Test-SharedServerIdentity {
 		if ([string]$o.Server -ne [string]$Entry.Server) { continue }
 		if ([bool]$o.ExplicitPort -ne [bool]$Entry.ExplicitPort) { continue }
 		if ([string]$o.Kind -ne [string]$Entry.Kind) { continue }
-		if ((Get-MountIdentity -Spec $o) -ne (Get-MountIdentity -Spec $Entry)) { continue }
+		if ((Get-MountLogin -Spec $o) -ne (Get-MountLogin -Spec $Entry)) { continue }
 		if ($held.ContainsKey(([string]$o.Drive).ToUpperInvariant())) { return $true }
 	}
 	return $false
