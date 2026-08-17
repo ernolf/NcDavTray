@@ -155,6 +155,7 @@ $script:I18N_Embedded_En = @'
 # ================================================================
 #__inc:modules/Hook-FormDpi.ps1__
 #__inc:modules/Hook-FormScreen.ps1__
+#__inc:modules/Invoke-WithWindowMinimized.ps1__
 #__inc:modules/Get-EmbeddedIconBytes.ps1__
 #__inc:modules/Ensure-AppBrandIcons.ps1__
 #__inc:modules/Apply-BrandIconToForm.ps1__
@@ -360,6 +361,7 @@ function Load-Config {
 # ================================================================
 #__inc:modules/New-BasicAuthHeader.ps1__
 #__inc:modules/New-HttpGetRequest.ps1__
+#__inc:modules/New-HttpPostRequest.ps1__
 #__inc:modules/Get-HttpImage.ps1__
 #__inc:modules/Get-NcServerStatus.ps1__
 #__inc:modules/Get-FavIconFilePath.ps1__
@@ -670,6 +672,10 @@ function Remove-ShareById([string]$Id) {
 	$entry = Get-MountEntry $Id
 	if (-not $entry) { return }
 	if ((Show-CustomMsgBoxT 'message.confirm_remove_share' @{ share = (Get-MountDisplayName $entry) } 'YesNo' 'Question') -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+	# Read before the store is touched: a password that is gone cannot be withdrawn on
+	# the server any more. Only an account has one -- a share carries a token.
+	$plain = ''
+	if ([string]$entry.Kind -eq 'account') { try { $plain = Unprotect-MountSecret -Entry $entry } catch {} }
 	$spec = New-MountSpecFromEntry $entry
 	try { Unmap-DriveIfOurs -Spec $spec -Force -RemoveProfile } catch {}
 	try { Refresh-ExplorerDriveRemoval $spec.Drive } catch {}
@@ -683,7 +689,15 @@ function Remove-ShareById([string]$Id) {
 	Save-Config
 	# A stored password outlives the mount it was given for, so the last mount that
 	# used it has to say goodbye. For a share that is the only way it ever goes.
-	Remove-UnusedAccountSecret -Server $entry.Server -User (Get-MountSecretName $entry)
+	$dropped = Remove-UnusedAccountSecret -Server $entry.Server -User (Get-MountSecretName $entry)
+	# Forgetting the password here leaves it valid there: the server keeps listing it
+	# under 'Devices & sessions' until someone withdraws it. Whether that happens is
+	# the user's call -- the same password may be in use somewhere else.
+	if ($dropped -and -not [string]::IsNullOrWhiteSpace($plain)) {
+		if ((Ask-YesNoQuestT 'prompt.revoke_app_password' @{ user = [string]$entry.User; server = [string]$entry.Server }) -eq [System.Windows.Forms.DialogResult]::Yes) {
+			if (-not (Revoke-NcAppPassword -Server $entry.Server -User $entry.User -Pass $plain)) { Show-WarnT 'message.revoke_app_password_failed' @{ user = [string]$entry.User; server = [string]$entry.Server } }
+		}
+	}
 	Update-Trays
 }
 # Removing a mount disposes its tray icon, and with it the menu the click came out
@@ -817,6 +831,16 @@ function Show-SettingsDialog {
 #__inc:modules/Get-NcFolderChildren.ps1__
 #__inc:modules/Join-SubPath.ps1__
 #__inc:modules/Show-NcFolderPicker.ps1__
+# Login Flow v2: the app password is fetched in the browser instead of being typed,
+# and withdrawn on the server when the last mount that used it is removed.
+#__inc:modules/Test-SameHostHttps.ps1__
+#__inc:modules/Get-CommandExePath.ps1__
+#__inc:modules/Get-InstalledBrowsers.ps1__
+#__inc:modules/Open-UrlInBrowser.ps1__
+#__inc:modules/Start-NcLoginFlow.ps1__
+#__inc:modules/Invoke-NcLoginFlowPoll.ps1__
+#__inc:modules/Show-NcLoginFlowDialog.ps1__
+#__inc:modules/Revoke-NcAppPassword.ps1__
 #__inc:modules/Render-BasicSettingsTab.ps1__
 #__inc:modules/Show-AccountSettingsWindow.ps1__
 #__inc:modules/Set-AccountEditorContext.ps1__

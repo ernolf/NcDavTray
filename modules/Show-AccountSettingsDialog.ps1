@@ -7,7 +7,9 @@ function Show-AccountSettingsDialog {
 	$keepTip = $script:Tip; $keepHost = $script:HostForm; $keepLang = $script:ApplyLanguageNow; $keepClose = $script:ButtonClose1
 	try {
 		Set-AccountEditorContext -Entry $Entry
-		return (Show-AccountSettingsWindow)
+		# The window this one was opened from is blocked for as long as it is up, and
+		# it cannot be pushed aside either -- so it goes out of the way by itself.
+		return (Invoke-WithWindowMinimized -Window $script:SettingsForm -Body { Show-AccountSettingsWindow })
 	} finally {
 		$script:Tip = $keepTip; $script:HostForm = $keepHost; $script:ApplyLanguageNow = $keepLang; $script:ButtonClose1 = $keepClose
 	}

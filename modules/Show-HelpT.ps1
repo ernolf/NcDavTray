@@ -1,5 +1,7 @@
 # i18n: custom help dialog with optional clickable URL
-function global:Show-HelpT([string]$TitleKey, [hashtable]$TitleVars = $null, [string]$BodyKey, [hashtable]$BodyVars = $null, [string]$Url = $null, [int]$Width = 640, [int]$Height = 320, [System.Windows.Forms.Form]$Parent = $null) {
+# An optional second button leaves the dialog with DialogResult 'Retry', which is
+# how a help window can offer the way its subject can be avoided altogether.
+function global:Show-HelpT([string]$TitleKey, [hashtable]$TitleVars = $null, [string]$BodyKey, [hashtable]$BodyVars = $null, [string]$Url = $null, [int]$Width = 640, [int]$Height = 320, [System.Windows.Forms.Form]$Parent = $null, [string]$AltButtonKey = $null) {
 	Add-Type -AssemblyName System.Windows.Forms
 	Add-Type -AssemblyName System.Drawing
 	# Resolve i18n
@@ -47,6 +49,11 @@ function global:Show-HelpT([string]$TitleKey, [hashtable]$TitleVars = $null, [st
 	$btnRow = New-Object System.Windows.Forms.FlowLayoutPanel; $btnRow.Dock = 'Bottom' <# 'Fill' #>; $btnRow.FlowDirection = 'RightToLeft'; $btnRow.AutoSize = $false; $btnRow.Height = $script:ButtonXH + (2 * $script:ButtonPadY); $btnRow.Padding = New-Object System.Windows.Forms.Padding(0, $script:ButtonPadY, 0, 0)
 	$ok = New-Object System.Windows.Forms.Button; $ok.Text = $okTxt; $ok.Width = $script:ButtonMinW; $ok.Height = $script:ButtonXH; $ok.Add_Click({ $f.Close() })
 	$btnRow.Controls.Add($ok)
+	if (-not [string]::IsNullOrWhiteSpace($AltButtonKey)) {
+		$alt = New-Object System.Windows.Forms.Button; $alt.Text = (T $AltButtonKey); $alt.AutoSize = $true; $alt.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowOnly; $alt.Height = $script:ButtonXH; $alt.Margin = New-Object System.Windows.Forms.Padding(8, 0, 0, 0)
+		$alt.Add_Click({ $f.DialogResult = [System.Windows.Forms.DialogResult]::Retry; $f.Close() })
+		$btnRow.Controls.Add($alt)
+	}
 	$f.AcceptButton = $ok
 	$f.CancelButton = $ok
 	# ESC to close

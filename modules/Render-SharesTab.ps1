@@ -406,7 +406,17 @@ function Render-SharesTab {
 	# The list decides two widths, and neither of them is known before it has one:
 	# its own columns, and the mode line below it, which sits in a row that runs on
 	# under the buttons beside the list and may not follow it that far.
+	# Both of them follow from the width alone, and the width is not what the list
+	# raises this for most of the time: giving the columns the full client width
+	# brings up the horizontal scrollbar, the scrollbar takes its height off the
+	# client area, and that is a size change too. Measuring again drops the scrollbar,
+	# which is the next one -- the columns and the scrollbar trade places half a dozen
+	# times after every real resize, and every round of it is painted. A width that
+	# has already been laid out is therefore left alone.
+	$script:ShareListWidth = -1
 	$lv.Add_SizeChanged({
+			if ($script:ShareListView.ClientSize.Width -eq $script:ShareListWidth) { return }
+			$script:ShareListWidth = $script:ShareListView.ClientSize.Width
 			Update-ListViewColumns $script:ShareListView
 			if ($script:LabelMode -and -not $script:LabelMode.IsDisposed) {
 				$script:LabelMode.MaximumSize = New-Object System.Drawing.Size($script:ShareListView.Width, 0)
