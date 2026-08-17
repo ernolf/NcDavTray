@@ -21,9 +21,11 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		# reset favicon cache before fetch
 		$script:ServerFaviconBmp = $null
 		$srv = $script:TextServer.Text.Trim()
-		if ([string]::IsNullOrWhiteSpace($srv)) { Clear-PictureImage $script:PicFavicon; return }
+		if ([string]::IsNullOrWhiteSpace($srv)) { Clear-PictureImage $script:PicFavicon; & $script:RefreshPasswordState; return }
 		$null = Fetch-ServerFavicon ($srv)
 		if ($script:ServerFaviconBmp) { Set-PictureImageSafe $script:PicFavicon $script:ServerFaviconBmp } else { Clear-PictureImage $script:PicFavicon }
+		# The answer of the server decides what this page offers -- see RefreshPasswordState
+		& $script:RefreshPasswordState
 	})
 	# AvatarTimer tick
 	if (-not $script:AvatarTimer) { $script:AvatarTimer = New-Object System.Windows.Forms.Timer; $script:AvatarTimer.Interval = 500 }
@@ -72,11 +74,26 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 	# Encrypt button (right of password TextBox)
 	$script:ButtonEncrypt = New-Object Windows.Forms.Button; $script:ButtonEncrypt.Top = $script:LabelPassword.Top - 6; $script:ButtonEncrypt.Text = (T 'button.encrypt'); $script:ButtonEncrypt.Width = 100; $script:ButtonEncrypt.Left = $panelMain.ClientSize.Width - $script:ButtonEncrypt.Width -2; $script:ButtonEncrypt.Height = $script:ButtonH; $script:ButtonEncrypt.Anchor = 'Top, Right'
 	$script:TextPassword = New-Object Windows.Forms.TextBox; $script:TextPassword.Top = $script:LabelPassword.Top - 2; $script:TextPassword.Left = $script:TextServer.Left; $script:TextPassword.Width = $script:ButtonEncrypt.Left - $script:TextPassword.Left - 10; $script:TextPassword.UseSystemPasswordChar = $true; $script:TextPassword.Anchor = 'Top, Right'
+	# The two ways to a password, each in the place of the field it makes needless:
+	# the browser brings the login name along, and typing one is what the other way
+	# is for. An app password belongs to the server/user pair and not to a mount, so
+	# this is only ever asked once per pair: a pair that already has one shows what
+	# it has instead, and a second mount of the same account finds it there.
+	$script:ButtonBrowserLogin = New-Object Windows.Forms.Button; $script:ButtonBrowserLogin.Text = (T 'button.browser_login'); $script:ButtonBrowserLogin.Top = $script:LabelUser.Top - 6; $script:ButtonBrowserLogin.Height = $script:ButtonH; $script:ButtonBrowserLogin.Width = $script:TextUser.Width; $script:ButtonBrowserLogin.Left = $script:TextUser.Left; $script:ButtonBrowserLogin.Anchor = 'Top, Right'
+	$script:ButtonAppPwLogin = New-Object Windows.Forms.Button; $script:ButtonAppPwLogin.Text = (T 'button.app_password_login'); $script:ButtonAppPwLogin.Top = $script:ButtonEncrypt.Top; $script:ButtonAppPwLogin.Height = $script:ButtonH; $script:ButtonAppPwLogin.Width = $script:TextServer.Width; $script:ButtonAppPwLogin.Left = $script:TextServer.Left; $script:ButtonAppPwLogin.Anchor = 'Top, Right'
+	# Which way was taken for the pair in the boxes. Nothing is persisted about it:
+	# what a pair ended up with is visible from whether it has a password.
+	$script:AuthChoice = @{ Manual = $false }
+	# A password that was fetched but not saved yet. The dirty check works on the
+	# fields, and this one is in none of them.
+	$script:PendingSecret = $false
 	# Click handler: builds URL from current Server field or falls back
 	# capture once, so the handler will later have stable references. The parent form
 	# has to come from the captured $f: inside a closure, $script: addresses the
 	# closure's own scope and would read empty.
-	# Store both: textbox + app name
+	# Store both: textbox + app name. The browser login is in there as well, because
+	# the help window offers it as the way out of what it explains -- and a closure
+	# cannot reach the script scope it was written in.
 	$script:ButtonPasswordHelp.Tag = @{ tb = $script:TextServer; app = $AppName }
 	$script:ButtonPasswordHelp.Add_Click(({
 		param($sender, $args)
@@ -86,7 +103,8 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		$host = '<cloud.example.com>'
 		if (-not [string]::IsNullOrWhiteSpace($raw)) { $h = $raw.Trim(); if ($h -match '^\s*https?://') { try { $u = [Uri]$h; $h = $u.Host } catch {} }; $h = $h.Trim('/').Trim(); if (-not [string]::IsNullOrWhiteSpace($h)) { $host = $h } }
 		$url = "https://$host/index.php/settings/user/security"
-		[void](Show-HelpT -TitleKey 'title.app_password_help' -TitleVars @{ app = $app } -BodyKey 'message.app_password_help' -BodyVars @{ url = $url; app = $app } -Url $url -Width 640 -Height 320 -Parent $f)
+		$res = Show-HelpT -TitleKey 'title.app_password_help' -TitleVars @{ app = $app } -BodyKey 'message.app_password_help' -BodyVars @{ url = $url; app = $app } -Url $url -Width 640 -Height 320 -Parent $f -AltButtonKey 'button.browser_login_instead'
+		if ($res -eq [System.Windows.Forms.DialogResult]::Retry) { & $sender.Tag.browserLogin }
 	}).GetNewClosure())
 	# Subfolder (read-only -> only selection via picker)
 	$script:LabelSubfolder = New-Object Windows.Forms.Label; $script:LabelSubfolder.Text = (T 'label.subfolder'); $script:LabelSubfolder.Left = 12; $script:LabelSubfolder.Top = 102; $script:LabelSubfolder.AutoSize = $true
@@ -127,10 +145,86 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 	$script:Tip.SetToolTip($script:TextServer, (T 'tip.enter_server'))
 	$script:Tip.SetToolTip($script:TextUser, (T 'tip.enter_user'))
 	$script:Tip.SetToolTip($script:ButtonPasswordHelp, (T 'title.app_password_help'))
+	# Fetching an app password through the browser. The switch below and the help
+	# window behind the '?' both end up here.
+	$script:RunBrowserLogin = {
+		$srv = $script:TextServer.Text.Trim()
+		if ([string]::IsNullOrWhiteSpace($srv)) { Show-InfoT 'message.enter_server_first'; return }
+		# This window sits where the browser is about to come up and cannot be moved
+		# while the login window is open, so it steps aside for as long as that takes.
+		# The address has to travel with the block: it is run from another scope, and
+		# a plain block would look for $srv there and find nothing.
+		$res = Invoke-WithWindowMinimized -Window $script:HostForm -Body ({ Show-NcLoginFlowDialog -Server $srv }.GetNewClosure())
+		if (-not $res) { return }
+		# The answer names the server in the words of its own configuration, which can
+		# be a different address than the one that was typed -- and not necessarily one
+		# that is reachable from here. So it is offered, not taken.
+		$returned = $null
+		try { if (-not [string]::IsNullOrWhiteSpace($res.Server)) { $returned = ([Uri]$res.Server).Host } } catch {}
+		if ($returned -and -not [string]::Equals($returned, $srv, 'OrdinalIgnoreCase')) {
+			if ((Ask-YesNoQuestT 'prompt.login_flow_other_host' @{ returned = $returned; typed = $srv }) -eq [System.Windows.Forms.DialogResult]::Yes) { $srv = $returned }
+		}
+		$script:TextServer.Text = $srv
+		$script:TextUser.Text = [string]$res.LoginName
+		# The pair is whatever the two boxes say now, and it is the pair the password
+		# just fetched belongs to. Setting the text does this by itself unless the value
+		# was already there, which is why it is asked for and not assumed.
+		& $script:RefreshPairPassword
+		# A password nobody typed is stored right away: what the browser handed over is
+		# final, and leaving it in the box for an Encrypt click would only be a way to
+		# lose it. The password of a pair that had one is replaced -- the fresh one is
+		# what the user just asked the server for.
+		$script:AuthChoice.Manual = $true
+		$pw = [string]$res.AppPassword
+		$stored = $false
+		if ($script:EditSecretFile) { $stored = [bool](& $script:EditWriteSecret $pw) }
+		else { try { & $script:EditSetPassword $pw; $stored = $true } catch { Show-ErrorT 'message.store_password_failed' @{ err = $_.Exception.Message } } }
+		# Storing it is what can fail here -- a refused passphrase, a registry that says
+		# no. The password itself is good, so it goes into the field and Save gets
+		# another chance at it rather than the user another login.
+		if ($stored) { $script:TextPassword.Text = ''; $script:PendingSecret = $false }
+		else { $script:Edit.EncPass = ''; $script:TextPassword.Text = $pw; $script:PendingSecret = $true }
+		& $script:RefreshPasswordState
+		& $script:UpdateSaveButton
+	}
+	$script:ButtonPasswordHelp.Tag.browserLogin = $script:RunBrowserLogin
+	$script:ButtonBrowserLogin.Add_Click({ & $script:RunBrowserLogin })
+	# The other way needs nothing but the fields it hides: no password is fetched,
+	# the user brings both the login name and the password.
+	$script:ButtonAppPwLogin.Add_Click({ $script:AuthChoice.Manual = $true; & $script:RefreshPasswordState; try { $script:TextUser.Focus() } catch {} })
 	# Local helper: controls state depending on encrypted password presence
 	$script:RefreshPasswordState = {
 		$hasEncPortable = $script:EditSecretFile -and (& $script:EditHasSecret)
 		$hasEncInstalled = (-not $script:EditSecretFile) -and (-not [string]::IsNullOrEmpty($script:Edit.EncPass))
+		# A pair without a stored password gets the switch instead of the fields: the two
+		# ways there are to one, and neither of them is typing into a box yet.
+		$choice = (-not $hasEncPortable) -and (-not $hasEncInstalled) -and (-not $script:AuthChoice.Manual)
+		# Nothing to choose between before there is a server to log in to, and the
+		# favicon is the answer of the server itself: it is there once the address
+		# leads to a Nextcloud.
+		$serverKnown = ($script:PicFavicon -and $script:PicFavicon.Image)
+		$showChoice = $choice -and $serverKnown
+		$script:ButtonBrowserLogin.Visible = $showChoice
+		$script:ButtonAppPwLogin.Visible = $showChoice
+		# The login name is part of what is being decided here: one way brings it back
+		# from the server, the other is the one that asks for it.
+		$script:LabelUser.Text = $(if ($choice) { (T 'label.login') } else { (T 'label.user') })
+		$script:LabelUser.Visible = (-not $choice) -or $showChoice
+		$script:TextUser.Visible = (-not $choice)
+		$script:PicAvatar.Visible = (-not $choice)
+		# The help explains how to get a password. With one stored, there is nothing left
+		# to explain and the field below says so instead.
+		$script:ButtonPasswordHelp.Visible = (-not $choice) -and (-not $hasEncPortable) -and (-not $hasEncInstalled)
+		$script:LabelPassword.Visible = (-not $choice)
+		$script:TextPassword.Visible = (-not $choice)
+		$script:ButtonEncrypt.Visible = (-not $choice)
+		$script:Tip.SetToolTip($script:ButtonBrowserLogin, (T 'tip.browser_login'))
+		# Back at the switch, so a password typed for the pair that stood here a moment
+		# ago is gone: it would be invisible from here on, and saved all the same.
+		if ($choice) {
+			$script:PendingSecret = $false
+			if ($script:TextPassword.Text -and $script:TextPassword.Tag -ne 'info') { $script:TextPassword.Text = '' }
+		}
 		# Decide if browsing is allowed
 		$localCanBrowse = ($hasEncPortable -or $hasEncInstalled)
 		# Publish new state so MouseDown/KeyDown see it immediately
@@ -206,7 +300,11 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		$script:Edit.EncPass = Get-AccountSecret -Server $script:Edit.Server -User $script:Edit.User
 		& $script:RefreshPasswordState
 	}
-	$script:TextServer.add_TextChanged({ & $script:RefreshPairPassword })
+	# Another server is another question, and the way that was chosen for the last
+	# one says nothing about this one. The login name is not one of those questions:
+	# typing it is what the manual way consists of, and it must not undo the choice
+	# it was chosen for.
+	$script:TextServer.add_TextChanged({ $script:AuthChoice.Manual = $false; & $script:RefreshPairPassword })
 	$script:TextUser.add_TextChanged({ & $script:RefreshPairPassword })
 	# Initial state (now $script:ButtonBrowse exists)
 	& $script:RefreshPasswordState
@@ -276,6 +374,8 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		& $setTxt $script:LabelSubfolder (T 'label.subfolder')
 		& $setTxt $script:LabelDriveLetter (T 'label.drive')
 		& $setTxt $script:LabelDisplayName (T 'label.display_name')
+		& $setTxt $script:ButtonBrowserLogin (T 'button.browser_login')
+		& $setTxt $script:ButtonAppPwLogin (T 'button.app_password_login')
 		& $setTxt $script:ButtonSave (T 'button.save')
 		& $setTxt $script:ButtonClose1 (T 'button.close')
 		# force-refresh all tooltips to avoid stale cached strings
@@ -299,7 +399,9 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 	}
 	# Baseline corresponds to the loaded/last saved state
 	$script:Baseline = & $script:GetPendingConfig
-	$script:HasUnsavedChanges = { $now = & $script:GetPendingConfig; foreach ($k in $script:Baseline.Keys) { if ( ($script:Baseline[$k] -as [string]) -ne ($now[$k] -as [string]) ) { return $true } } return $false }
+	# A password fetched through the browser is a change like any other, and the only
+	# one that leaves no trace in the fields the baseline is made of.
+	$script:HasUnsavedChanges = { if ($script:PendingSecret) { return $true }; $now = & $script:GetPendingConfig; foreach ($k in $script:Baseline.Keys) { if ( ($script:Baseline[$k] -as [string]) -ne ($now[$k] -as [string]) ) { return $true } } return $false }
 	# Toggle Save button depending on dirty state
 	$script:UpdateSaveButton = { try { if ($script:ButtonSave) { $dirty = (& $script:HasUnsavedChanges); $script:ButtonSave.Enabled = $dirty } } catch {} }
 	& $script:UpdateSaveButton # Initial state
@@ -346,6 +448,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 				}
 			# Pair store: if user typed a new password, persist immediately (DPAPI)
 			} elseif ($script:TextPassword.Text -and ($script:TextPassword.Tag -ne 'info')) { try { & $script:EditSetPassword $script:TextPassword.Text } catch { Show-ErrorT 'message.store_password_failed' @{ err = $_.Exception.Message }; return } }
+			$script:PendingSecret = $false
 			# --- normalize subpath from UI (read-only textbox filled by picker) ---
 			$valSub = $script:TxtSub.Text.Trim()
 			if ($valSub -eq '/') { $valSub = '' } else { $valSub = $valSub.Trim('/').Replace('\', '/') }
@@ -377,6 +480,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		$script:LabelServer, $script:PicFavicon, $script:TextServer,
 		$script:LabelUser, $script:PicAvatar, $script:TextUser,
 		$script:LabelPassword, $script:ButtonPasswordHelp, $script:TextPassword, $script:ButtonEncrypt,
+		$script:ButtonBrowserLogin, $script:ButtonAppPwLogin,
 		$script:LabelSubfolder, $script:TxtSub,
 		$script:LabelDriveLetter, $script:ComboBoxDrive,
 		$script:LabelDisplayName, $script:TxtDisp
@@ -409,6 +513,8 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 			$script:RebindUIFromEdit = $null
 			$script:BasicSettings_Auto = $null
 			$script:BrowseState = $null
+			$script:RunBrowserLogin = $null
+			$script:AuthChoice = $null
 		} catch {}
 		# encourage prompt collection of now-unrooted closures
 		try { [System.GC]::Collect(); [System.GC]::WaitForPendingFinalizers() } catch {}
@@ -417,6 +523,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 			$script:TextServer = $null; $script:TextUser = $null; $script:TxtSub = $null; $script:TextPassword = $null; $script:TxtDisp = $null
 			$script:ComboBoxDrive = $null
 			$script:ButtonPasswordHelp = $null; $script:ButtonEncrypt = $null; $script:ButtonSave = $null; $script:ButtonClose1 = $null
+			$script:ButtonBrowserLogin = $null; $script:ButtonAppPwLogin = $null
 			$script:PicFavicon = $null; $script:PicAvatar = $null
 			$script:FaviconTimer = $null; $script:AvatarTimer = $null
 		} catch {}

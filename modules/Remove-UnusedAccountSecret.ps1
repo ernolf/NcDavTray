@@ -3,14 +3,15 @@
 # duplicated share carries the token of the one it was copied from -- so the last
 # one to go is what settles it. User is the name from Get-MountSecretName.
 # Called after the entry has been removed from the store, so what is still listed
-# is what still needs the password.
+# is what still needs the password. True when the password was actually dropped.
 function Remove-UnusedAccountSecret {
 	[CmdletBinding()] param( [Parameter(Mandatory)][AllowEmptyString()][string]$Server, [Parameter(Mandatory)][AllowEmptyString()][string]$User )
-	if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($User)) { return }
+	if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($User)) { return $false }
 	$key = Get-AccountKey -Server $Server -User $User
 	foreach ($e in @(Read-MountEntriesFromRegistry)) {
 		if (-not $e) { continue }
-		if ((Get-AccountKey -Server $e.Server -User (Get-MountSecretName $e)) -eq $key) { return }
+		if ((Get-AccountKey -Server $e.Server -User (Get-MountSecretName $e)) -eq $key) { return $false }
 	}
 	Set-AccountSecret -Server $Server -User $User -EncPass ''
+	return $true
 }
