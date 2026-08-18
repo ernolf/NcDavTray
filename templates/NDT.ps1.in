@@ -256,6 +256,7 @@ $script:I18N_Embedded_En = @'
 #	The stored mount list (registry when installed, json when portable)
 # ================================================================
 #__inc:modules/Get-RegBase.ps1__
+#__inc:modules/Get-StoredLangPref.ps1__
 #__inc:modules/Get-MountsRegPath.ps1__
 #__inc:modules/Read-MountEntriesFromRegistry.ps1__
 #__inc:modules/Write-MountEntry.ps1__
@@ -1063,6 +1064,13 @@ if ($Watchdog) { Run-Watchdog -OnOwnerGone { Unmap-AllMounts }; return }
 # What Installer.cmd asks for. Both run without a tray and without the lock: this
 # copy is here to write a folder, not to mount anything, and the instance it is
 # writing over is the one that has to go instead.
+# Neither of them reaches Load-Config, so the preference is read on its own: what
+# they have to say belongs in the language of the installation they are working
+# on, not in the language Windows happens to run in.
+if ($Action -eq 'Install' -or $Action -eq 'ExportPortable') {
+	$pref = Get-StoredLangPref
+	if ($pref) { Initialize-I18n $pref }
+}
 if ($Action -eq 'Install') {
 	$script:FromInstaller = $true
 	# The script cannot be replaced under a copy that is running it, and the drives
