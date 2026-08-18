@@ -179,6 +179,7 @@
 	"prompt.folder_is_not_empty_overwrite": "Folder '{dir}' is not empty.\r\nOverwrite its contents?",
 	"prompt.import_portable_settings_to_installed": "Import current portable settings into the installed app?",
 	"prompt.login_flow_other_host": "The login was confirmed on {returned}, not on {typed}.\r\n\r\nUse {returned}?",
+	"prompt.login_name_switch": "{old} is the account {id}, signed in under another name.\r\n\r\nPut its mounts on the user id {id}? A connected drive has to be disconnected and connected again for that, and files that are open on it right now are lost.\r\n\r\nNo keeps everything on {old}.",
 	"prompt.revoke_app_password": "The last mount of {user}@{server} has been removed, and with it the password stored here.\r\n\r\nWithdraw the app password on {server} as well (recommended)?\r\n\r\nKeep it only if the same app password is in use somewhere else.",
 	"prompt.start_disabled_warn": "This App relies on the WebClient service and will no longer work once the WebClient service is disabled..\r\nDo you really want to disable it?",
 	"prompt.unsaved_changes": "There are unsaved changes. Should these be saved before exiting?",

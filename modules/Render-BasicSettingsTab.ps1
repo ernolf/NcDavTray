@@ -165,7 +165,48 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 			if ((Ask-YesNoQuestT 'prompt.login_flow_other_host' @{ returned = $returned; typed = $srv }) -eq [System.Windows.Forms.DialogResult]::Yes) { $srv = $returned }
 		}
 		$script:TextServer.Text = $srv
-		$script:TextUser.Text = [string]$res.LoginName
+		$pw = [string]$res.AppPassword
+		$login = ([string]$res.LoginName).Trim()
+		# What comes back is a login name, and a login name is not the account: a mail
+		# address logs in just as well, and stored, mapped and counted under that
+		# spelling the same person becomes a second account with a second Windows
+		# identity. The id is the one spelling everybody agrees on, so an account is
+		# settled on it wherever the password allows it -- a token carries the login
+		# name it was created with and is refused under any other, which is what
+		# decides between the three ways out of here.
+		$name = $login
+		$mode = 'save'
+		$uid = Get-NcUserId -Server $srv -User $login -Pass $pw
+		if (-not [string]::IsNullOrWhiteSpace($uid)) {
+			$known = Find-AccountByUserId -Server $srv -UserId $uid
+			if ($uid -eq $login) {
+				# Signed in as the id, give or take capitalisation -- which the server ignores
+				# and Windows does not. This password works under the id, so everything of
+				# this account can move there.
+				$name = $uid
+				if ($known -and ($known -cne $uid)) {
+					if (Confirm-LoginNameSwitch -Server $srv -OldUser $known -NewUser $uid) {
+						Switch-AccountLoginName -Server $srv -OldUser $known -NewUser $uid -NewPlain $pw
+						$mode = 'done'
+						# The account is on the id and saved now; what this page has to compare
+						# against when it saves is that, not the name it was opened with.
+						if ($script:Baseline) { $script:Baseline.User = $uid }
+					}
+					else { $name = $known; $mode = 'revoke' }
+				}
+			}
+			elseif ($known) {
+				# Signed in under something else, a mail address. The account is already here
+				# under a spelling that has a working password, and a second one would buy
+				# nothing and cost an identity.
+				$name = $known
+				$mode = 'revoke'
+			}
+		}
+		# An app password nothing is going to use is withdrawn rather than left behind
+		# as one more entry under Devices & sessions.
+		if ($mode -eq 'revoke') { [void](Revoke-NcAppPassword -Server $srv -User $login -Pass $pw) }
+		$script:TextUser.Text = $name
 		# The pair is whatever the two boxes say now, and it is the pair the password
 		# just fetched belongs to. Setting the text does this by itself unless the value
 		# was already there, which is why it is asked for and not assumed.
@@ -175,15 +216,19 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		# lose it. The password of a pair that had one is replaced -- the fresh one is
 		# what the user just asked the server for.
 		$script:AuthChoice.Manual = $true
-		$pw = [string]$res.AppPassword
-		$stored = $false
-		if ($script:EditSecretFile) { $stored = [bool](& $script:EditWriteSecret $pw) }
-		else { try { & $script:EditSetPassword $pw; $stored = $true } catch { Show-ErrorT 'message.store_password_failed' @{ err = $_.Exception.Message } } }
-		# Storing it is what can fail here -- a refused passphrase, a registry that says
-		# no. The password itself is good, so it goes into the field and Save gets
-		# another chance at it rather than the user another login.
-		if ($stored) { $script:TextPassword.Text = ''; $script:PendingSecret = $false }
-		else { $script:Edit.EncPass = ''; $script:TextPassword.Text = $pw; $script:PendingSecret = $true }
+		if ($mode -eq 'save') {
+			$stored = $false
+			if ($script:EditSecretFile) { $stored = [bool](& $script:EditWriteSecret $pw) }
+			else { try { & $script:EditSetPassword $pw; $stored = $true } catch { Show-ErrorT 'message.store_password_failed' @{ err = $_.Exception.Message } } }
+			# Storing it is what can fail here -- a refused passphrase, a registry that says
+			# no. The password itself is good, so it goes into the field and Save gets
+			# another chance at it rather than the user another login.
+			if ($stored) { $script:TextPassword.Text = ''; $script:PendingSecret = $false }
+			else { $script:Edit.EncPass = ''; $script:TextPassword.Text = $pw; $script:PendingSecret = $true }
+		}
+		# Nothing to store: the account keeps the password it already had, which
+		# RefreshPairPassword has just picked up for the pair the fields now name.
+		else { $script:TextPassword.Text = ''; $script:PendingSecret = $false }
 		& $script:RefreshPasswordState
 		& $script:UpdateSaveButton
 	}

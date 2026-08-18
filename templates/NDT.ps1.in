@@ -841,6 +841,14 @@ function Show-SettingsDialog {
 #__inc:modules/Invoke-NcLoginFlowPoll.ps1__
 #__inc:modules/Show-NcLoginFlowDialog.ps1__
 #__inc:modules/Revoke-NcAppPassword.ps1__
+# A login hands back the name that was typed, which need not be the user id. These
+# settle an account on its id, and an account that is already here under another
+# spelling of the same id on it as well.
+#__inc:modules/Get-NcUserId.ps1__
+#__inc:modules/Get-AccountMounts.ps1__
+#__inc:modules/Find-AccountByUserId.ps1__
+#__inc:modules/Confirm-LoginNameSwitch.ps1__
+#__inc:modules/Switch-AccountLoginName.ps1__
 #__inc:modules/Render-BasicSettingsTab.ps1__
 #__inc:modules/Show-AccountSettingsWindow.ps1__
 #__inc:modules/Set-AccountEditorContext.ps1__

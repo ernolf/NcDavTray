@@ -179,6 +179,7 @@
 	"prompt.folder_is_not_empty_overwrite": "Le dossier '{dir}' n'est pas vide.\r\nÉcraser son contenu ?",
 	"prompt.import_portable_settings_to_installed": "Importer les paramètres actuels de la version portable dans l'application installée ?",
 	"prompt.login_flow_other_host": "La connexion a été confirmée sur {returned}, et non sur {typed}.\r\n\r\nUtiliser {returned} ?",
+	"prompt.login_name_switch": "{old} est le compte {id}, connecté sous un autre nom.\r\n\r\nBasculer ses montages sur l'identifiant d'utilisateur {id} ? Un lecteur connecté doit pour cela être déconnecté puis reconnecté, et les fichiers ouverts dessus à ce moment-là sont perdus.\r\n\r\nNon conserve tout sur {old}.",
 	"prompt.revoke_app_password": "Le dernier montage de {user}@{server} a été supprimé, et avec lui le mot de passe enregistré ici.\r\n\r\nRévoquer également le mot de passe d'application sur {server} (recommandé) ?\r\n\r\nNe le conservez que si ce même mot de passe d'application est utilisé ailleurs.",
 	"prompt.start_disabled_warn": "Cette application dépend du service WebClient et ne fonctionnera plus une fois que le service WebClient sera désactivé.\r\nVoulez-vous vraiment le désactiver ?",
 	"prompt.unsaved_changes": "Des modifications non enregistrées. Voulez-vous les enregistrer avant de quitter ?",

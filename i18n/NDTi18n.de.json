@@ -179,6 +179,7 @@
 	"prompt.folder_is_not_empty_overwrite": "Ordner '{dir}' ist nicht leer.\r\nInhalt überschreiben?",
 	"prompt.import_portable_settings_to_installed": "Aktuelle Einstellungen der portablen Version in die installierte App übernehmen?",
 	"prompt.login_flow_other_host": "Die Anmeldung wurde auf {returned} bestätigt, nicht auf {typed}.\r\n\r\n{returned} verwenden?",
+	"prompt.login_name_switch": "{old} ist das Konto {id}, nur unter einem anderen Namen angemeldet.\r\n\r\nDessen Einbindungen auf die Benutzer-ID {id} umstellen? Ein verbundenes Laufwerk muss dafür getrennt und neu verbunden werden, dabei gehen gerade geöffnete Dateien verloren.\r\n\r\nNein behält alles bei {old}.",
 	"prompt.revoke_app_password": "Der letzte Mount von {user}@{server} wurde entfernt, und damit auch das hier gespeicherte Passwort.\r\n\r\nDas App-Passwort auch auf {server} widerrufen (empfohlen)?\r\n\r\nBehalten Sie es nur, wenn dasselbe App-Passwort noch anderswo verwendet wird.",
 	"prompt.start_disabled_warn": "Diese App ist auf den WebClient-Dienst angewiesen und wird nicht mehr funktionieren, sobald der WebClient-Dienst deaktiviert ist.\r\nMöchten Sie ihn wirklich deaktivieren?",
 	"prompt.unsaved_changes": "Es gibt ungespeicherte Änderungen. Sollen diese vor dem Verlassen gespeichert werden?",

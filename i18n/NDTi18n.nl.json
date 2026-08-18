@@ -179,6 +179,7 @@
 	"prompt.folder_is_not_empty_overwrite": "Map '{dir}' is niet leeg.\r\nInhoud overschrijven?",
 	"prompt.import_portable_settings_to_installed": "Instellingen van de portable versie overzetten naar de geïnstalleerde app?",
 	"prompt.login_flow_other_host": "De aanmelding is bevestigd op {returned}, niet op {typed}.\r\n\r\n{returned} gebruiken?",
+	"prompt.login_name_switch": "{old} is het account {id}, alleen onder een andere naam aangemeld.\r\n\r\nDe koppelingen ervan op de gebruikers-ID {id} zetten? Een verbonden station moet daarvoor worden losgekoppeld en opnieuw verbonden, en bestanden die op dat moment geopend zijn gaan verloren.\r\n\r\nMet Nee blijft alles op {old}.",
 	"prompt.revoke_app_password": "De laatste mount van {user}@{server} is verwijderd, en daarmee ook het hier opgeslagen wachtwoord.\r\n\r\nHet app-wachtwoord ook op {server} intrekken (aanbevolen)?\r\n\r\nBehoud het alleen als hetzelfde app-wachtwoord ergens anders in gebruik is.",
 	"prompt.start_disabled_warn": "Deze app is afhankelijk van de WebClient-service en zal niet meer werken zodra de WebClient-service is gedeactiveerd.\r\nWilt u deze echt deactiveren?",
 	"prompt.unsaved_changes": "Er zijn niet-opgeslagen wijzigingen. Moeten deze worden opgeslagen voor het verlaten?",
