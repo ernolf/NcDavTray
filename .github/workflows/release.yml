@@ -31,10 +31,11 @@ jobs:
       - name: Tag and meta/Version.ps1 agree
         shell: pwsh
         run: |
+          . .\meta\AppName.ps1
           . .\meta\Version.ps1
           $tag = '${{ github.event.release.tag_name }}'
           if ($tag -ne "v$Version") { throw "release $tag was cut from a tree that says $Version -- see meta/Version.ps1" }
-          "archive=NcDavTray_v$Version.zip" >> $env:GITHUB_ENV
+          "archive=${AppName}_v$Version.zip" >> $env:GITHUB_ENV
 
       # The same targets a contributor runs at home, in the same order.
       - name: make check

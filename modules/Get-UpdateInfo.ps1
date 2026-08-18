@@ -5,7 +5,7 @@
 # release the About box links to and not a second address that can drift.
 function Get-UpdateInfo {
 	[CmdletBinding()] param([int]$TimeoutMs = 6000)
-	$fail = [pscustomobject]@{ Ok = $false; Tag = ''; Version = $null; Newer = $false }
+	$fail = [pscustomobject]@{ Ok = $false; Tag = ''; Version = $null; Newer = $false; AssetUrl = ''; AssetSize = 0 }
 	$repo = [regex]::Match([string]$ProjectUrl, '^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$')
 	if (-not $repo.Success) { return $fail }
 	$uri = 'https://api.github.com/repos/{0}/{1}/releases/latest' -f $repo.Groups[1].Value, $repo.Groups[2].Value
@@ -37,5 +37,17 @@ function Get-UpdateInfo {
 	# than saying nothing.
 	$newer = $false
 	if ($ver) { try { $newer = ($ver -gt [version]$Version) } catch {} }
-	return [pscustomobject]@{ Ok = $true; Tag = $tag; Version = $ver; Newer = $newer }
+	# The archive the release workflow attaches, looked up by the name it is built
+	# under rather than by taking whatever file happens to hang on the release --
+	# something added there by hand is not what this offers to install. A release
+	# without it is still an answer: it says a newer version exists, and the way to
+	# it is the project page.
+	$url = ''; $size = 0
+	$want = '{0}_v{1}.zip' -f $AppName, ($tag -replace '^v', '')
+	if ($j.PSObject.Properties.Name -contains 'assets') {
+		foreach ($a in @($j.assets)) {
+			if (([string]$a.name) -ieq $want) { $url = [string]$a.browser_download_url; try { $size = [int64]$a.size } catch { $size = 0 }; break }
+		}
+	}
+	return [pscustomobject]@{ Ok = $true; Tag = $tag; Version = $ver; Newer = $newer; AssetUrl = $url; AssetSize = $size }
 }

@@ -38,7 +38,12 @@ jobs:
       - name: make dist
         shell: cmd
         run: make.cmd dist
+      - name: Name the artifact after the product
+        shell: pwsh
+        run: |
+          . .\meta\AppName.ps1
+          "artifact=$AppName" >> $env:GITHUB_ENV
       - uses: actions/upload-artifact@v4
         with:
-          name: NcDavTray
+          name: ${{ env.artifact }}
           path: build/*.zip

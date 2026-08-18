@@ -47,10 +47,11 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
 # == Layout ==
+. (Join-Path $RepoRoot 'meta\AppName.ps1')
 $BuildDir = Join-Path $RepoRoot 'build'
 # The folder the user ends up with after unpacking, so it is also the folder
 # inside the release archive.
-$ProductDir = Join-Path $BuildDir 'NcDavTray'
+$ProductDir = Join-Path $BuildDir $AppName
 
 # == Targets ==
 $Targets = @(

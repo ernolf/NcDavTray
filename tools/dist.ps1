@@ -22,17 +22,21 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $BuildDir = Join-Path $RepoRoot 'build'
-$ProductDir = Join-Path $BuildDir 'NcDavTray'
+
+# Name and version of what is packed, both read from the single places that
+# define them. The archive name is not ours alone: Get-UpdateInfo builds the
+# name it looks for on a release out of the same two values, and an update it
+# cannot find is an update that does not happen.
+. (Join-Path $RepoRoot 'meta\AppName.ps1')
+. (Join-Path $RepoRoot 'meta\Version.ps1')
+
+$ProductDir = Join-Path $BuildDir $AppName
 
 if (-not (Test-Path -LiteralPath $ProductDir -PathType Container)) {
 	throw ("nothing to pack: {0} does not exist -- build first" -f $ProductDir)
 }
 
-# The version the archive is named after is the one the scripts report, read
-# from the single place that defines it.
-. (Join-Path $RepoRoot 'meta\Version.ps1')
-
-$archive = Join-Path $BuildDir ("NcDavTray_v{0}.zip" -f $Version)
+$archive = Join-Path $BuildDir ("{0}_v{1}.zip" -f $AppName, $Version)
 if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
 
 # ZipFile and ZipFileExtensions come from the first assembly, ZipArchive and

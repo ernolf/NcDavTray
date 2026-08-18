@@ -27,6 +27,12 @@ function Show-AboutDialog {
 	$btnUpd = New-Object System.Windows.Forms.Button; $btnUpd.Text = (T 'button.check_update'); $btnUpd.Height = $script:ButtonXH
 	$btnUpd.Width = [Math]::Max($script:ButtonMinW, ([System.Windows.Forms.TextRenderer]::MeasureText($btnUpd.Text, $f.Font).Width + 24))
 	$btnUpd.Left = 16; $btnUpd.Top = $f.ClientSize.Height - $btnUpd.Height - 16; $btnUpd.Anchor = 'Bottom, Left'
+	# It takes the place of the check rather than standing next to it: two buttons
+	# side by side fit in English and run into the OK button in the next language,
+	# and once the answer is on screen there is nothing left to check.
+	$btnGet = New-Object System.Windows.Forms.Button; $btnGet.Text = (T 'button.update_now'); $btnGet.Height = $script:ButtonXH
+	$btnGet.Width = [Math]::Max($script:ButtonMinW, ([System.Windows.Forms.TextRenderer]::MeasureText($btnGet.Text, $f.Font).Width + 24))
+	$btnGet.Left = $btnUpd.Left; $btnGet.Top = $btnUpd.Top; $btnGet.Anchor = 'Bottom, Left'; $btnGet.Visible = $false
 	$btnUpd.Add_Click({
 			$this.Enabled = $false
 			$lblUpd.Text = (T 'label.update_checking')
@@ -38,15 +44,48 @@ function Show-AboutDialog {
 			if (-not $info.Ok) { $lblUpd.Text = (T 'label.update_failed') }
 			elseif ($info.Newer) { $lblUpd.Text = (T 'label.update_available' @{ version = $shown }) }
 			else { $lblUpd.Text = (T 'label.update_current') }
+			# Offered only for a release that brought the archive along. Without it there
+			# is nothing to install from here, and the project page is the way on.
+			if ($info.Ok -and $info.Newer) {
+				$script:UpdateOffer = $info
+				if ($info.AssetUrl) { $this.Visible = $false; $btnGet.Visible = $true }
+			}
 			$this.Enabled = $true
+		})
+	$btnGet.Add_Click({
+			$offer = $script:UpdateOffer
+			if (-not $offer) { return }
+			$shown = if ($offer.Version) { $offer.Version.ToString() } else { $offer.Tag }
+			if ((Ask-YesNoQuestT 'prompt.update_now' @{ app = $AppName; version = $shown }) -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+			$this.Enabled = $false
+			$lblUpd.Text = (T 'label.update_downloading'); $lblUpd.Refresh()
+			$ps1 = Save-UpdatePackage -Url $offer.AssetUrl -Size $offer.AssetSize
+			if ([string]::IsNullOrEmpty($ps1)) {
+				$lblUpd.Text = (T 'label.update_download_failed')
+				$this.Visible = $false; $btnUpd.Visible = $true; $this.Enabled = $true
+				return
+			}
+			# Out of the way first: what follows takes the whole application down, and a
+			# modal dialog still on screen has a message loop of its own to unwind.
+			$f.Close()
+			[void](Start-UpdateHandover -ScriptPath $ps1)
 		})
 	$chkUpd.Add_Click({
 			$State.UpdateCheck = [bool]$this.Checked
 			Save-Config
 		})
+	# What a check has already found, from this box or from the one at startup. The
+	# balloon named the version and this is where the user comes to act on it, so
+	# asking the project page the same question again would only be a way of making
+	# the answer arrive later.
+	if ($script:UpdateOffer) {
+		$shown = if ($script:UpdateOffer.Version) { $script:UpdateOffer.Version.ToString() } else { $script:UpdateOffer.Tag }
+		$lblUpd.Text = (T 'label.update_available' @{ version = $shown })
+		if ($script:UpdateOffer.AssetUrl) { $btnUpd.Visible = $false; $btnGet.Visible = $true }
+	}
 	# Dispose avatar image to free GDI handles
 	$f.add_FormClosed({ if ($pb -and $pb.Image) { try { $pb.Image.Dispose() } catch {} } })
-	if ($pb) { $f.Controls.AddRange(@($lblTit, $lblDes, $lblVer, $lblAut, $link, $lblUpd, $chkUpd, $pb, $btnUpd, $ok)) }
-	else { $f.Controls.AddRange(@($lblTit, $lblDes, $lblVer, $lblAut, $link, $lblUpd, $chkUpd, $btnUpd, $ok)) }
+	if ($pb) { $f.Controls.AddRange(@($lblTit, $lblDes, $lblVer, $lblAut, $link, $lblUpd, $chkUpd, $pb, $btnUpd, $btnGet, $ok)) }
+	else { $f.Controls.AddRange(@($lblTit, $lblDes, $lblVer, $lblAut, $link, $lblUpd, $chkUpd, $btnUpd, $btnGet, $ok)) }
 	[void]$f.ShowDialog()
 }
