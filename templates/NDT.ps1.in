@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-[CmdletBinding()] param([ValidateSet('', 'Install', 'ExportPortable', 'CacheAgent')] [string]$Action = '', [switch]$Watchdog, [string]$MainMutexName, [int]$OwnerPid, [int]$IntervalSeconds = 3)
+[CmdletBinding()] param([ValidateSet('', 'Install', 'ExportPortable', 'CacheAgent', 'Update')] [string]$Action = '', [switch]$Watchdog, [string]$MainMutexName, [int]$OwnerPid, [int]$IntervalSeconds = 3, [string]$Target = '')
 
 # --- Anchor current script path/name/dir for later use (PS 5.1 safe) ---
 try { if (-not $script:ThisScriptPath -and $PSCommandPath) { $script:ThisScriptPath = $PSCommandPath } } catch {}
@@ -117,6 +117,10 @@ $script:MapMutexes = @{}; $script:DriveGuards = @{}
 # One tray record per mount, keyed by the entry's Id, plus the always present
 # application icon that owns the program menu.
 $script:Trays = @{}; $script:TrayManager = $null; $script:Quitting = $false
+# The result of the last update check, whoever asked for it. It outlives the About
+# box so that the box opened after the balloon shows the answer the balloon gave
+# instead of asking the project page the same question a second time.
+$script:UpdateOffer = $null
 # Set for as long as something is mapping or unmapping. Everything in here runs
 # on the one UI thread, but not one after the other: a modal dialog and the
 # shell notification both pump the message loop, and the poll timer fires into
@@ -370,9 +374,15 @@ function Load-Config {
 #__inc:modules/Fetch-UserAvatar.ps1__
 
 # ================================================================
-#	Update check (releases of the project)
+#	Update check and update (releases of the project)
 # ================================================================
+# What the project page offers, how it gets here, and how it takes over. The copy
+# that performs an update is always the downloaded one -- Complete-AppUpdate runs
+# there and is reached through -Action Update, not from any window.
 #__inc:modules/Get-UpdateInfo.ps1__
+#__inc:modules/Save-UpdatePackage.ps1__
+#__inc:modules/Start-UpdateHandover.ps1__
+#__inc:modules/Complete-AppUpdate.ps1__
 
 # ================================================================
 #	Explorer branding (MountPoints2 label, drive icon HKCU)
@@ -1067,6 +1077,13 @@ if ($Action -eq 'ExportPortable') {
 	Export-AppToPortable -Force
 	return
 }
+# What Start-UpdateHandover asks for, and only ever that: this copy was unpacked
+# into a temporary folder to write itself over an existing one. No tray, no lock,
+# no configuration -- the installation it is replacing keeps all of that.
+if ($Action -eq 'Update') {
+	[void](Complete-AppUpdate -Target $Target -WaitForPid $OwnerPid)
+	return
+}
 Ensure-SingleInstanceForConfig
 # Up to 1.2.2 the drive icon was cached beside the script. Nothing reads that
 # file any more, and it is taken away wherever it is still lying about.
@@ -1093,25 +1110,37 @@ $script:startupTimer.Interval = 1
 $script:startupTimer.Add_Tick({ $this.Stop(); $this.Dispose(); Connect-AllMounts })
 $script:startupTimer.Start()
 
-# Only when it was asked for, and behind the mounts rather than in front of them:
-# the answer is nothing anyone is waiting for, and the request holds this thread
-# for as long as the project page needs. A balloon, because it interrupts nothing
-# -- and only when there is something to say. Up to date and out of reach are both
-# answers nobody asked to be told about.
-if ($State.UpdateCheck) {
-	$script:updateTimer = New-Object System.Windows.Forms.Timer
-	$script:updateTimer.Interval = 3000
-	$script:updateTimer.Add_Tick({
-			$this.Stop(); $this.Dispose()
+# One balloon at every start. The program comes up hidden and usually from the
+# autostart entry, so without this there is nothing at all that says it is running
+# or which version of it. It is also the whole answer after an update: the version
+# named is the one that was just installed, and the line about a newer release is
+# missing because there is no newer release any more.
+# Behind the mounts rather than in front of them -- a balloon has to be painted,
+# and the mount phase holds the loop until it is through.
+$script:startTimer = New-Object System.Windows.Forms.Timer
+$script:startTimer.Interval = 2000
+$script:startTimer.Add_Tick({
+		$this.Stop(); $this.Dispose()
+		$lines = @([string](T 'label.started' @{ version = $Version }))
+		# Only when it was asked for, and in this balloon rather than in one of its
+		# own: a second toast replaces the first, which would leave the start line on
+		# screen for as long as it takes to be overwritten. The request holds this
+		# thread for as long as the project page needs, so the whole balloon waits --
+		# what it has to say is worth more together than early.
+		if ($State.UpdateCheck) {
 			$info = $null
 			try { $info = Get-UpdateInfo } catch {}
 			if ($info -and $info.Ok -and $info.Newer) {
+				# Kept, not just announced: the About box is where the user goes after
+				# reading the balloon, and it has the same answer waiting there.
+				$script:UpdateOffer = $info
 				$shown = if ($info.Version) { $info.Version.ToString() } else { $info.Tag }
-				try { Show-CustomBalloon -Title $AppName -Text (T 'label.update_available' @{ version = $shown }) -TimeoutMs 6600 } catch {}
+				$lines += [string](T 'label.update_offer' @{ version = $shown })
 			}
-		})
-	$script:updateTimer.Start()
-}
+		}
+		try { Show-CustomBalloon -Title $AppName -Text ($lines -join "`n") -TimeoutMs 6600 } catch {}
+	})
+$script:startTimer.Start()
 
 # The poll keeps the mounts up but never asks for anything: a dialog out of a
 # timer tick would interrupt whatever the user is doing at that moment.
