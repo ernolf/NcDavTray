@@ -7,7 +7,7 @@ function Invoke-WebClientWriteBroker {
 	$tmpJson = [System.IO.Path]::GetTempFileName().Replace('.tmp', '.json')
 	($ValuesToSet | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $tmpJson -Encoding UTF8
 	# Log file for debugging (persists across runs)
-	$tmpLog = Join-Path $env:TEMP 'NcDavTray-WebClientBroker.log'
+	$tmpLog = Join-Path $env:TEMP ('{0}-WebClientBroker.log' -f $AppName)
 	$broker = @"
 param([string]`$JsonPath, [string]`$LogPath)
 `$ErrorActionPreference = 'Stop'

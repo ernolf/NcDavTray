@@ -58,13 +58,14 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $RepoRoot 'meta\AppName.ps1')
+$ProductDir = Join-Path (Join-Path $RepoRoot 'build') $AppName
 
 if ($Path.Count -eq 0) {
-	$productDir = Join-Path $RepoRoot 'build\NcDavTray'
-	if (-not (Test-Path -LiteralPath $productDir -PathType Container)) {
-		throw ("nothing to check: {0} does not exist -- build first" -f $productDir)
+	if (-not (Test-Path -LiteralPath $ProductDir -PathType Container)) {
+		throw ("nothing to check: {0} does not exist -- build first" -f $ProductDir)
 	}
-	$Path = @(Get-ChildItem -LiteralPath $productDir -Filter *.ps1 | ForEach-Object { $_.FullName })
+	$Path = @(Get-ChildItem -LiteralPath $ProductDir -Filter *.ps1 | ForEach-Object { $_.FullName })
 }
 
 # Names PowerShell provides on its own, so nothing assigns them in the scripts.
@@ -325,7 +326,7 @@ Write-Result $styleName 'style, worth a look' $styleHints -Warn
 # nothing at runtime can tell them apart: an -Action the ValidateSet does not know
 # is refused while the parameters are still being bound, so the script never gets
 # far enough to say anything about it.
-$bootstrap = Join-Path $RepoRoot 'build\NcDavTray\Installer.cmd'
+$bootstrap = Join-Path $ProductDir 'Installer.cmd'
 if (Test-Path -LiteralPath $bootstrap) {
 	$problems = @()
 	$text = [System.IO.File]::ReadAllText($bootstrap)
