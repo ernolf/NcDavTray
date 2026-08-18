@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Sections up to 1.2.2 were written after the fact, from the notes of the releases
 they belong to — the project had no changelog while those were made.
 
-## [2.0.0] - 2026-08-17
+## [2.0.0] - 2026-08-18
 
 ### Added
 
@@ -24,6 +24,8 @@ they belong to — the project had no changelog while those were made.
 - **Duplicate…**, which clones a mount to reach a second folder of the same account under another letter
 - A tray icon per mount, showing its state, and a switch to turn the per-mount icons off
 - A check for a newer release from the About box, and optionally once at startup
+- **Update now** in the About box, which installs that release: the downloaded copy writes over the running one and starts it again, and mounts, passwords, settings, shortcuts and autostart survive it. Language packs are merged rather than replaced, and nothing is written over before the download is verified against the size the release states (#17)
+- A balloon a moment after every start, naming the version that is running — and the newer release in the same balloon when the startup check found one (#17)
 - A status of its own for a mount Windows refuses because the server has no free login left, instead of reporting it as a failed mapping
 
 ### Changed
