@@ -179,6 +179,7 @@
 	"prompt.folder_is_not_empty_overwrite": "La carpeta '{dir}' no está vacía.\r\n¿Sobrescribir su contenido?",
 	"prompt.import_portable_settings_to_installed": "¿Importar la configuración actual portátil en la app instalada?",
 	"prompt.login_flow_other_host": "El inicio de sesión se confirmó en {returned}, no en {typed}.\r\n\r\n¿Usar {returned}?",
+	"prompt.login_name_switch": "{old} es la cuenta {id}, solo que con otro nombre de inicio de sesión.\r\n\r\n¿Pasar sus montajes al identificador de usuario {id}? Para ello hay que desconectar y volver a conectar una unidad conectada, y los archivos abiertos en ella en ese momento se pierden.\r\n\r\nCon No todo se queda en {old}.",
 	"prompt.revoke_app_password": "Se ha eliminado el último montaje de {user}@{server} y, con él, la contraseña guardada aquí.\r\n\r\n¿Revocar también la contraseña de app en {server} (recomendado)?\r\n\r\nConsérvala solo si esa misma contraseña de app se usa en otro sitio.",
 	"prompt.start_disabled_warn": "Esta aplicación depende del servicio WebClient y dejará de funcionar cuando el servicio WebClient esté deshabilitado.\r\n¿Realmente desea deshabilitarlo?",
 	"prompt.unsaved_changes": "Hay cambios sin guardar. ¿Desea guardarlos antes de salir?",
