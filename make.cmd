@@ -47,9 +47,10 @@ echo   1) Check     - build, then run the static checks
 echo   2) Build     - assemble build\NcDavTray
 echo   3) Dist      - build, then pack the release archive
 echo   4) Clean     - delete build\
-echo   5) i18n      - write build\i18n-todo\ for the translators
-echo   6) i18n add  - read translated files back into i18n\
-echo   7) i18n sort - rewrite the language packs in canonical form
+echo   5) Changelog - draft the section for the current version
+echo   6) i18n      - write build\i18n-todo\ for the translators
+echo   7) i18n add  - read translated files back into i18n\
+echo   8) i18n sort - rewrite the language packs in canonical form
 echo   0) Exit
 echo ==============================================
 set "choice="
@@ -59,9 +60,10 @@ if "%choice%"=="1" goto do_check
 if "%choice%"=="2" goto do_build
 if "%choice%"=="3" goto do_dist
 if "%choice%"=="4" goto do_clean
-if "%choice%"=="5" goto do_i18n
-if "%choice%"=="6" goto do_i18n_merge
-if "%choice%"=="7" goto do_i18n_normalize
+if "%choice%"=="5" goto do_changelog
+if "%choice%"=="6" goto do_i18n
+if "%choice%"=="7" goto do_i18n_merge
+if "%choice%"=="8" goto do_i18n_normalize
 if "%choice%"=="0" goto end
 echo Invalid choice.
 echo.
@@ -81,6 +83,10 @@ goto run
 
 :do_clean
 set "_ACTION=clean"
+goto run
+
+:do_changelog
+set "_ACTION=changelog"
 goto run
 
 :do_i18n

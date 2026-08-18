@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# What make.cmd changelog generates a release section from. Keep a Changelog
+# sections out of Conventional Commits, and only what a user of the program can
+# notice: feat -> Added, fix -> Fixed, perf -> Changed. build, ci, test, chore,
+# docs, refactor and style describe the workshop rather than the product and are
+# left out; a release that consists of nothing else gets its section written by
+# hand or none at all.
+
+[changelog]
+# No header: CHANGELOG.md already carries one, and the generated section is
+# inserted into that file rather than replacing it.
+header = ""
+body = """
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+
+{% for commit in commits -%}
+- {% if commit.breaking %}**BREAKING** {% endif %}{% if commit.scope %}**{{ commit.scope }}** — {% endif %}{{ commit.message | upper_first }}
+{% endfor %}
+{%- endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+protect_breaking_commits = true
+tag_pattern = "v[0-9].*"
+sort_commits = "oldest"
+commit_parsers = [
+  # A breaking change is the one thing a user has to be told whatever type
+  # carries it, and Keep a Changelog has one place for it. This rule stands
+  # first so that the type below never gets to claim it.
+  { message = "^[a-z]+(\\(.+\\))?!:", group = "Changed" },
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Changed" },
+  { message = ".*", skip = true },
+]
