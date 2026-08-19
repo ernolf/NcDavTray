@@ -229,9 +229,9 @@ function Show-AddShareDialog {
 		# what tells two shares on one server apart.
 		$label = $txtName.Text.Trim()
 		if ([string]::IsNullOrWhiteSpace($label)) { $label = $parsed.Token }
-		# A protected share only mounts over the legacy endpoint. Ensure-MountPassword
-		# settles that on the first connect, but only for an entry that arrives without
-		# a password in hand -- and the one below arrives with it.
+		# A protected share only mounts over the legacy endpoint for now.
+		# Ensure-MountPassword settles that on the first connect, but only for an entry
+		# that arrives without a password in hand -- and the one below arrives with it.
 		$kind = if ([string]::IsNullOrEmpty($txtPass.Text)) { 'share' } else { 'share-legacy' }
 		$entry = New-MountEntry -Server $parsed.Server -Token $parsed.Token -Drive $cmbDrive.Text -Label $label -Kind $kind
 		# The password was accepted a moment ago, so the first connect has no reason to
