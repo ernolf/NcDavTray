@@ -3,7 +3,9 @@
 # global state:
 #   Kind = 'account'       /remote.php/dav/files/<User>, login <User>
 #   Kind = 'share'         /public.php/dav/files/<Token>, login 'anonymous'
-#   Kind = 'share-legacy'  /public.php/webdav, login <Token> (pre-NC29 servers)
+#   Kind = 'share-legacy'  /public.php/webdav, login <Token> (pre-NC29 servers,
+#                          and for now every password protected share, see
+#                          Ensure-MountPassword)
 # ExplicitPort appends '@443' to the host part. The mini-redirector keys its
 # sessions on the host string, so the explicit port forms a second server
 # identity for the same host and lets a share coexist with an account mapping

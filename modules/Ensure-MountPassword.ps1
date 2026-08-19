@@ -39,6 +39,10 @@ function Ensure-MountPassword {
 	# Only one direction is switched -- an entry already on the legacy endpoint may
 	# be there because its server predates the modern one, and that is not ours to
 	# undo.
+	# The detour is meant to end. It stands as long as servers in the field answer
+	# a 302 here; against one that serves these shares the switch has no business
+	# firing, so what replaces the line below is a server side test, not a deletion:
+	# the entries it wrote are already saved as 'share-legacy' and stay that way.
 	if ($state -eq 'password') { $Entry.Kind = 'share-legacy' }
 
 	# A password kept from an earlier connect is tried before anyone is asked for
