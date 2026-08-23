@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+# SPDX-License-Identifier: MIT
+#
+# ncmake branch cleanup: when a pull request is merged, delete its head branch
+# if it is still there. This is the workflow-shipped equivalent of the
+# repository "Automatically delete head branches" setting (see
+# https://github.com/ernolf/ncmake/wiki/Deleting-merged-branches): unlike that
+# per-repository toggle it travels
+# with the repository through `make workflows-install`, so a repository gets the
+# cleanup even when no admin has flipped the setting. Running both is harmless:
+# whichever removes the branch first wins and the other is a quiet no-op.
+#
+# It only deletes a branch that lives in this repository (never a fork's branch)
+# and never the default branch, and it tolerates the branch already being gone,
+# so it is safe to run alongside the repository setting, Dependabot's own branch
+# deletion, or the workflow updater's self-cleanup.
+
+name: ncmake branch cleanup
+
+on:
+  # Fires for every closed pull request; the job filters down to merged ones.
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+concurrency:
+  # Serialise deletions of the same branch; never cancel an in-flight delete.
+  group: ncmake-branch-cleanup-${{ github.event.pull_request.head.ref }}
+  cancel-in-progress: false
+
+jobs:
+  delete-branch:
+    # Only merged pull requests, only a head branch that lives in this
+    # repository (a fork's branch cannot and must not be deleted from here),
+    # and never the default branch.
+    if: >-
+      github.event.pull_request.merged == true
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.head.ref != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the merged head branch if it is still there
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          ref="repos/${{ github.repository }}/git/refs/heads/${HEAD_REF}"
+          # The repository's "Automatically delete head branches" setting,
+          # Dependabot, or a fast-clicking admin may have removed the branch
+          # already. Only delete what is still there, and tolerate it vanishing
+          # between the check and the delete, so a redundant run is a quiet
+          # no-op instead of a failure.
+          if gh api "$ref" >/dev/null 2>&1; then
+            gh api --method DELETE "$ref" \
+              || echo "Could not delete the branch (already gone or handled elsewhere); nothing to do."
+          else
+            echo "Branch already deleted; nothing to do."
+          fi
