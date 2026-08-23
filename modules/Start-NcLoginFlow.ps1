@@ -24,8 +24,9 @@ function Start-NcLoginFlow {
 		# Both URLs come out of the answer: one is opened in the browser, the other is
 		# where the token goes. Neither is followed unless it is https on the host that
 		# was asked, so nothing in the answer can move either of them somewhere else.
-		if (-not (Test-SameHostHttps ([string]$j.login) $srv)) { return $null }
-		if (-not (Test-SameHostHttps ([string]$j.poll.endpoint) $srv)) { return $null }
+		$h = (Split-ServerString $srv).Host
+		if (-not (Test-SameHostHttps ([string]$j.login) $h)) { return $null }
+		if (-not (Test-SameHostHttps ([string]$j.poll.endpoint) $h)) { return $null }
 		return [pscustomobject]@{ LoginUrl = [string]$j.login; PollEndpoint = [string]$j.poll.endpoint; PollToken = [string]$j.poll.token }
 	} catch { return $null }
 }

@@ -101,7 +101,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		$app = [string]$sender.Tag.app
 		$raw = if ($tb) { $tb.Text } else { '' }
 		$host = '<cloud.example.com>'
-		if (-not [string]::IsNullOrWhiteSpace($raw)) { $h = $raw.Trim(); if ($h -match '^\s*https?://') { try { $u = [Uri]$h; $h = $u.Host } catch {} }; $h = $h.Trim('/').Trim(); if (-not [string]::IsNullOrWhiteSpace($h)) { $host = $h } }
+		if (-not [string]::IsNullOrWhiteSpace($raw)) { $h = $raw.Trim(); if ($h -match '^\s*https?://') { try { $u = [Uri]$h; $h = '{0}{1}' -f $u.Host, $u.AbsolutePath } catch {} }; $h = $h.Trim('/').Trim(); if (-not [string]::IsNullOrWhiteSpace($h)) { $host = $h } }
 		$url = "https://$host/index.php/settings/user/security"
 		$res = Show-HelpT -TitleKey 'title.app_password_help' -TitleVars @{ app = $app } -BodyKey 'message.app_password_help' -BodyVars @{ url = $url; app = $app } -Url $url -Width 640 -Height 320 -Parent $f -AltButtonKey 'button.browser_login_instead'
 		if ($res -eq [System.Windows.Forms.DialogResult]::Retry) { & $sender.Tag.browserLogin }
@@ -160,7 +160,7 @@ function Render-BasicSettingsTab([System.Windows.Forms.Control] $HostTab = $null
 		# be a different address than the one that was typed -- and not necessarily one
 		# that is reachable from here. So it is offered, not taken.
 		$returned = $null
-		try { if (-not [string]::IsNullOrWhiteSpace($res.Server)) { $returned = ([Uri]$res.Server).Host } } catch {}
+		try { if (-not [string]::IsNullOrWhiteSpace($res.Server)) { $u = [Uri]$res.Server; $returned = ('{0}{1}' -f $u.Host, $u.AbsolutePath).TrimEnd('/') } } catch {}
 		if ($returned -and -not [string]::Equals($returned, $srv, 'OrdinalIgnoreCase')) {
 			if ((Ask-YesNoQuestT 'prompt.login_flow_other_host' @{ returned = $returned; typed = $srv }) -eq [System.Windows.Forms.DialogResult]::Yes) { $srv = $returned }
 		}

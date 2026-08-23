@@ -210,17 +210,32 @@ function Normalize-SubPath([string]$sp) {
 }
 
 # Host part, path segments, UNC path and MountPoints2 key names are built the way
-# NcDavTray builds them (Get-MountHostPart, Get-MountPathSegments, Get-MP2KeyNames).
+# NcDavTray builds them (Split-ServerString, Get-MountHostPart,
+# Get-MountPathSegments, Get-MP2KeyNames).
 # An explicit port is part of the host string and therefore part of the identity
 # the redirector keys its session on, so a check that leaves it out compares a
-# healthy mount against a path it was never mapped under.
+# healthy mount against a path it was never mapped under. An instance installed
+# in a subdirectory carries that path in its segments, not in its host.
+function Split-ServerString([string]$server) {
+	$s = ([string]$server).Trim().Trim('/')
+	$i = $s.IndexOf('/')
+	$h = if ($i -lt 0) { $s } else { $s.Substring(0, $i) }
+	$b = if ($i -lt 0) { '' } else { $s.Substring($i + 1).Trim('/') }
+	$key = if ($b) { '{0}/{1}' -f $h.ToLowerInvariant(), $b } else { $h.ToLowerInvariant() }
+	return @{ Host = $h; BasePath = $b; Key = $key }
+}
+
 function Build-HostPart([psobject]$cfg) {
-	if ($cfg.ExplicitPort) { return ('{0}@ssl@443' -f $cfg.Server) }
-	return ('{0}@ssl' -f $cfg.Server)
+	$h = (Split-ServerString $cfg.Server).Host
+	if ($cfg.ExplicitPort) { return ('{0}@ssl@443' -f $h) }
+	return ('{0}@ssl' -f $h)
 }
 
 function Build-PathSegments([psobject]$cfg) {
-	$segs = switch ($cfg.Kind) {
+	$segs = @()
+	$base = (Split-ServerString $cfg.Server).BasePath
+	if ($base) { $segs += @(($base -split '/') | Where-Object { $_ }) }
+	$segs += switch ($cfg.Kind) {
 		'share'        { @('public.php', 'dav', 'files', $cfg.Token) }
 		'share-legacy' { @('public.php', 'webdav') }
 		default        { @('remote.php', 'dav', 'files', $cfg.User) }
@@ -318,9 +333,11 @@ function Mask-InLine {
 		}
 	}
 
-	# Nextcloud host
+	# Nextcloud host. Longest first: an instance in a subdirectory is on record
+	# under both spellings, and 'host/nc' has to go before 'host' or the path
+	# would be left standing next to the placeholder.
 	if ($script:KnownHosts -and $script:KnownHosts.Count -gt 0) {
-		foreach ($h in $script:KnownHosts) {
+		foreach ($h in @($script:KnownHosts | Sort-Object -Property Length -Descending)) {
 			if ([string]::IsNullOrWhiteSpace($h)) { continue }
 			$escaped = [regex]::Escape($h)
 			$masked  = [regex]::Replace($masked, $escaped, '<NC_HOST(anonymized)>')
@@ -557,13 +574,13 @@ switch ($mode) {
 							# A share is named by a token that grants access, so only its presence is reported
 							Add-Line $sb ("      Token set: {0}" -f $(if ($tok) { 'yes' } else { 'no' }))
 							if ($usr -and $srv) {
-								$key = ('{0}|{1}' -f $srv.Trim().ToLowerInvariant(), $usr.Trim())
+								$key = ('{0}|{1}' -f (Split-ServerString $srv).Key, $usr.Trim())
 								Add-Line $sb ("      Password stored for this account: {0}" -f $(if ($accountNames -contains $key) { 'yes' } else { 'no' }))
 							}
 							if ($has -contains 'ExplicitPort') { Add-Line $sb ("      Explicit port: {0}" -f [bool][int]$m.ExplicitPort) }
 							if ($has -contains 'Enabled') { Add-Line $sb ("      Enabled: {0}" -f [bool][int]$m.Enabled) }
 							if ($has -contains 'Order') { Add-Line $sb ("      Order: {0}" -f [int]$m.Order) }
-							if ($srv) { $script:KnownHosts += $srv }
+							if ($srv) { $script:KnownHosts += @($srv, (Split-ServerString $srv).Host) }
 							if ($drv) { $script:KnownDrives += $drv }
 							if ($usr) { $script:KnownNcUsers += $usr }
 							if ($lbl) { $script:KnownLabels += $lbl }
@@ -579,7 +596,7 @@ switch ($mode) {
 							$flat = Get-ItemProperty -Path $RegBase -ErrorAction Stop
 							if (($flat.PSObject.Properties.Name -contains 'Server') -and $flat.Server) {
 								Add-Line $sb ("  Legacy flat account still present: {0}" -f $flat.Server)
-								$script:KnownHosts += $flat.Server
+								$script:KnownHosts += @($flat.Server, (Split-ServerString $flat.Server).Host)
 								if ($flat.PSObject.Properties.Name -contains 'Drive' -and $flat.Drive) { $script:KnownDrives += $flat.Drive }
 								if ($flat.PSObject.Properties.Name -contains 'User' -and $flat.User) { $script:KnownNcUsers += $flat.User }
 								if ($flat.PSObject.Properties.Name -contains 'Label' -and $flat.Label) { $script:KnownLabels += $flat.Label }
@@ -648,7 +665,7 @@ switch ($mode) {
 					# A share is named by a token that grants access, so only its presence is reported
 					Add-Line $sb ("      Token set: {0}" -f $(if ($cfg.Token) { 'yes' } else { 'no' }))
 					Add-Line $sb ("      Explicit port: {0}" -f $cfg.ExplicitPort)
-					if ($cfg.Server) { $script:KnownHosts += $cfg.Server }
+					if ($cfg.Server) { $script:KnownHosts += @($cfg.Server, (Split-ServerString $cfg.Server).Host) }
 					if ($cfg.Drive)  { $script:KnownDrives += $cfg.Drive }
 					if ($cfg.User)   { $script:KnownNcUsers += $cfg.User }
 					if ($cfg.Label)  { $script:KnownLabels += $cfg.Label }
@@ -1115,7 +1132,7 @@ if ($doHttp -match '^[Yy]') {
 		Write-Host "Using Nextcloud host from NcDavTray config (hidden in report)." -ForegroundColor Cyan
 	} else {
 		# Fallback: ask user
-		$httpHost = Read-Host "Enter Nextcloud server host only (e.g. cloud.example.com)"
+		$httpHost = Read-Host "Enter Nextcloud server address without https:// (e.g. cloud.example.com or cloud.example.com/nextcloud)"
 	}
 
 	if (-not [string]::IsNullOrWhiteSpace($httpHost)) {

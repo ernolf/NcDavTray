@@ -1,7 +1,8 @@
 # Takes a public link as it is copied out of Nextcloud and returns the server and
 # the token it names, or $null if it names neither. The token is the segment that
-# follows '/s/'; everything before it belongs to the server's own installation
-# path and says nothing about the WebDAV endpoint.
+# follows '/s/'; what sits in front of it is the path the instance is installed
+# under and belongs in the server string, all but the 'index.php' that a link
+# without pretty URLs carries.
 # Only https on the standard port is accepted, because that is all the host part
 # of a mount can express (see Get-MountHostPart).
 function ConvertFrom-ShareLink {
@@ -17,9 +18,14 @@ function ConvertFrom-ShareLink {
 	if ([string]::IsNullOrWhiteSpace($uri.Host)) { return $null }
 	$segments = @(($uri.AbsolutePath -split '/') | Where-Object { $_ -ne '' })
 	$token = ''
+	$at = -1
 	for ($i = 0; $i -lt ($segments.Count - 1); $i++) {
-		if ($segments[$i] -eq 's') { $token = $segments[$i + 1]; break }
+		if ($segments[$i] -eq 's') { $token = $segments[$i + 1]; $at = $i; break }
 	}
 	if ([string]::IsNullOrWhiteSpace($token)) { return $null }
-	return [pscustomobject]@{ Server = $uri.Host; Token = [uri]::UnescapeDataString($token) }
+	$base = @()
+	if ($at -gt 0) { $base = @($segments | Select-Object -First $at) }
+	if ($base.Count -gt 0 -and $base[-1] -eq 'index.php') { $base = @($base | Select-Object -First ($base.Count - 1)) }
+	$server = if ($base.Count -gt 0) { '{0}/{1}' -f $uri.Host, ($base -join '/') } else { [string]$uri.Host }
+	return [pscustomobject]@{ Server = $server; Token = [uri]::UnescapeDataString($token) }
 }

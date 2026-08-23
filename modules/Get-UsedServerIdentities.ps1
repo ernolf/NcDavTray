@@ -2,12 +2,15 @@
 # The answer cannot come from the configuration: the account mapping belongs to
 # another process, and a connection made outside this product counts just the
 # same. What Windows itself has on record is the only complete picture.
+# A full server string may be handed in; the two identities belong to the host,
+# and two instances on one host share them.
 function Get-UsedServerIdentities {
 	[CmdletBinding()] param( [Parameter(Mandatory)][string]$Server )
 	$used = @{ Plain = $false; ExplicitPort = $false; Drives = @() }
 	if ([string]::IsNullOrWhiteSpace($Server)) { return $used }
-	$plain = '\\{0}@ssl\' -f $Server
-	$port = '\\{0}@ssl@443\' -f $Server
+	$h = (Split-ServerString $Server).Host
+	$plain = '\\{0}@ssl\' -f $h
+	$port = '\\{0}@ssl@443\' -f $h
 	# Both sources are asked because neither is complete on its own:
 	# Win32_NetworkConnection was seen to leave out a mapped drive that net use
 	# lists, and Win32_LogicalDisk only knows connections that were given a letter,

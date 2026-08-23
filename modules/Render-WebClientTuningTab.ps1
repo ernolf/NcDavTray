@@ -379,7 +379,7 @@ function Render-WebClientTuningTab([Parameter(Mandatory)][System.Windows.Forms.T
 		# the field is only offered when one does. Re-checked here because mounts can be
 		# added while this window stays open.
 		if ($script:NumericLocalServerTimeout -and -not $script:NumericLocalServerTimeout.IsDisposed) {
-			$script:NumericLocalServerTimeout.Enabled = [bool](@($State.Mounts) | Where-Object { $_ -and ([string]$_.Server) -and ([string]$_.Server -notmatch '\.') })
+			$script:NumericLocalServerTimeout.Enabled = [bool](@($State.Mounts) | Where-Object { $_ -and ([string]$_.Server) -and ((Split-ServerString $_.Server).Host -notmatch '\.') })
 		}
 		if ($script:LabelInternetServerTimeoutCur -and -not $script:LabelInternetServerTimeoutCur.IsDisposed) { $v = & $raw 'InternetServerTimeoutInSec' $v_InternetTimeoutInSec $curNow; $script:LabelInternetServerTimeoutCur.Text = & $fmt $v }
 		if ($script:LabelSendReceiveTimeoutCur -and -not $script:LabelSendReceiveTimeoutCur.IsDisposed) { $v = & $raw 'SendReceiveTimeoutInSec' $v_SendReceiveTimeoutInSec $curNow; $script:LabelSendReceiveTimeoutCur.Text = & $fmt $v }
