@@ -1,0 +1,183 @@
+# SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+# SPDX-License-Identifier: MIT
+#
+# ncmake workflow updater: on a schedule, refreshes the ncmake-managed CI
+# workflows from their upstream templates (make workflows-update) and opens a
+# pull request when anything changed. This replaces Dependabot for the files
+# under .github/workflows/. Once that pull request is merged it deletes its own
+# branch, so no stale ncmake/ci/workflow-update branch is left behind.
+#
+# A comment of "@ncmake-updater rebase" on a pull request re-runs the update
+# job, which is all a rebase needs here: the job checks out the default branch,
+# regenerates the workflows and lets create-pull-request rebuild the branch from
+# that base. Going through the API is what keeps the commit verified -- a git
+# rebase in the runner would push unsigned commits, because no key lives there.
+#
+# Authentication is a GitHub App (Contents, Pull requests and Workflows: write),
+# minted per run as a short-lived token. The app is required because the default
+# GITHUB_TOKEN may not push workflow files, and it is preferred over a PAT
+# because the same token both pushes the files and produces verified, signed
+# commits. Store its credentials as the NCMAKE_UPDATER_CLIENT_ID and
+# NCMAKE_UPDATER_PRIVATE_KEY secrets. See
+# https://github.com/ernolf/ncmake/wiki/Workflow-updater and
+# https://github.com/ernolf/ncmake/wiki/GitHub-App.
+
+name: ncmake workflow update
+
+on:
+  schedule:
+    # Daily at 05:30 UTC. GitHub starts scheduled runs on a best-effort basis and
+    # delays them under load, so expect this a few hours late, not on the minute
+    # (see https://github.com/ernolf/ncmake/wiki/Workflow-updater). Trigger
+    # workflow_dispatch to run without
+    # waiting for the schedule.
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+  # React to a merge so the cleanup job can remove the updater's own branch.
+  # This fires for every closed pull request in the repository; the cleanup job
+  # filters down to a merged ncmake/ci/workflow-update.
+  pull_request:
+    types: [closed]
+  # "@ncmake-updater rebase" in a pull request comment. issue_comment fires for
+  # every comment in the repository, plain issues included; the update job
+  # filters down to pull request comments that carry the command.
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ncmake-workflow-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    # The scheduled/manual side: refresh the workflows and open the pull request.
+    # Skipped for the pull_request trigger, which only drives the cleanup job.
+    #
+    # The command is answered wherever it is written: the updater owns a single
+    # pull request, so a comment addressed to it can only mean that one. Who may
+    # ask is what matters, and that is the author association -- without it any
+    # passer-by could force-push the branch.
+    if: >-
+      github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.pull_request
+        && contains(github.event.comment.body, '@ncmake-updater rebase')
+        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+          github.event.comment.author_association)
+      )
+    runs-on: ubuntu-latest
+    # Reacting to the comment is the only thing the default token is used for
+    # here; everything that touches the repository runs on the app token.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.NCMAKE_UPDATER_CLIENT_ID }}
+          private-key: ${{ secrets.NCMAKE_UPDATER_PRIVATE_KEY }}
+
+      - name: Acknowledge the command
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Refresh managed workflows from upstream
+        env:
+          # 'make dev-init' lists the ncmake modules through the GitHub API, and
+          # an anonymous call gets 60 requests per hour counted per source IP --
+          # shared by every job on a hosted runner, so it answers 403 every so
+          # often and fails the step. The app token is already minted above.
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          make dev-init
+          make workflows-update
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          sign-commits: true
+          signoff: true
+          branch: ncmake/ci/workflow-update
+          delete-branch: true
+          add-paths: .github/workflows/
+          title: 'ci: update managed CI workflows from upstream'
+          commit-message: 'ci: update managed CI workflows from upstream'
+          body: |
+            Automated by the ncmake workflow updater.
+
+            `make workflows-update` refreshed the ncmake-managed workflows from
+            their upstream templates (nextcloud/.github + ncmake). Locally
+            modified workflows are left untouched. Review the diff and merge.
+
+            ---
+
+            Commands, written as a comment on this pull request:
+
+            - `@ncmake-updater rebase` rebuilds this branch on top of the
+              current base
+
+      - name: Report the command as done
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=rocket
+
+  cleanup:
+    # Delete the updater's own branch as soon as its pull request is merged,
+    # instead of leaving it until the next scheduled run removes it (which is
+    # what create-pull-request's delete-branch does). It uses the same GitHub
+    # App as the update job, so it always has Contents: write regardless of the
+    # repository's default token permissions. This only ever touches
+    # ncmake/ci/workflow-update, and is unrelated to the repository-wide
+    # "Automatically delete head branches" setting
+    # (see https://github.com/ernolf/ncmake/wiki/Deleting-merged-branches).
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.merged == true
+      && github.event.pull_request.head.ref == 'ncmake/ci/workflow-update'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.NCMAKE_UPDATER_CLIENT_ID }}
+          private-key: ${{ secrets.NCMAKE_UPDATER_PRIVATE_KEY }}
+
+      - name: Delete the merged updater branch if it is still there
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          ref="repos/${{ github.repository }}/git/refs/heads/ncmake/ci/workflow-update"
+          # The repository's "Automatically delete head branches" setting, or a
+          # fast-clicking admin, may have removed the branch already. Only delete
+          # what is still there, and tolerate it vanishing between the check and
+          # the delete, so a redundant run is a quiet no-op, not a failure.
+          if gh api "$ref" >/dev/null 2>&1; then
+            gh api --method DELETE "$ref" \
+              || echo "Branch was removed concurrently; nothing to do."
+          else
+            echo "Branch already deleted; nothing to do."
+          fi
