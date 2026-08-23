@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Sections up to 1.2.2 were written after the fact, from the notes of the releases
 they belong to — the project had no changelog while those were made.
 
+## [2.1.0] - 2026-08-23
+
+### Added
+
+- A Nextcloud that is installed in a subdirectory of a domain rather than at its root, entered as `cloud.example.com/nextcloud`. The installation path is shown next to the host wherever a server appears, because Windows counts its two logins per host: two installations on the same host share that limit between them. Mounts of an installation at the domain root keep the account key they had and need no migration (#23)
+
+[2.1.0]: https://github.com/ernolf/NcDavTray/releases/tag/v2.1.0
+
 ## [2.0.0] - 2026-08-18
 
 ### Added
