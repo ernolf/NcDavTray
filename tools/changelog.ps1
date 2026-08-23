@@ -57,8 +57,20 @@ if ($existing -match ("(?m)^## \[{0}\]" -f [regex]::Escape($Version))) {
 }
 
 Write-Host ("==> Generating the [{0}] section from the commits since the last tag..." -f $Version)
-$generated = & git-cliff --config $ConfigPath --unreleased --tag ("v{0}" -f $Version) 2>$null
-if ($LASTEXITCODE -ne 0) { throw 'git-cliff failed' }
+# git-cliff writes UTF-8, but Windows PowerShell decodes what a native command
+# prints with [Console]::OutputEncoding, which is the console's OEM code page
+# unless something set it otherwise. An em dash would arrive as the three
+# characters its UTF-8 bytes happen to mean in that code page, and be written
+# back into the file as those three -- the section is generated once and read
+# for years, so it cannot depend on which console it was generated in.
+$previousOutputEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+try {
+	$generated = & git-cliff --config $ConfigPath --unreleased --tag ("v{0}" -f $Version) 2>$null
+	if ($LASTEXITCODE -ne 0) { throw 'git-cliff failed' }
+} finally {
+	[Console]::OutputEncoding = $previousOutputEncoding
+}
 # Trimmed because git-cliff frames its output with blank lines even when the
 # configured header and footer are empty, and those land in the middle of the file.
 $section = (@($generated) -join "`n").Trim()
