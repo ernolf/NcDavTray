@@ -1,0 +1,12 @@
+{
+  "block-unconventional-commits.yml": {
+    "hash": "e1d854cced0b0bebfb49e695dd706114fa3634c2d1af1b88f480216a21f72efb",
+    "sha": "4972f8bb33dbeef4ff141444c50ad49adf6cb93d",
+    "source": "nextcloud"
+  },
+  "workflow-updater.yml": {
+    "hash": "814e72f4b396311bef70f1a8c576cbab21b3da3a8be445c9a60785d4e32eca1b",
+    "sha": "ee4b34f40f35dc808ff03ad661d6165a8826e2b9",
+    "source": "ncmake"
+  }
+}
