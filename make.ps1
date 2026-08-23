@@ -15,9 +15,13 @@
 		check           build, then run the static checks over the result
 		dist            build, then pack the release archive into build\
 		clean           delete build\
+		version         open the release branch for a new version and commit
+		                the bump into it -- maintainer target
 		changelog       write the section for the current version into
 		                CHANGELOG.md, generated from the commits since the
 		                last tag -- a draft to read through, not a result
+		tag             sign and push the release tag for the current version,
+		                once its pull request is merged -- maintainer target
 		i18n            write build\i18n-todo\ for the translators: per language
 		                the keys it is missing and the English text as their value
 		i18n-merge      read translated files from -From and write their values
@@ -29,7 +33,7 @@
 #>
 [CmdletBinding()]
 param(
-	[ValidateSet('build', 'check', 'dist', 'clean', 'changelog', 'i18n', 'i18n-merge', 'i18n-normalize', 'help')][string]$Target = 'check',
+	[ValidateSet('build', 'check', 'dist', 'clean', 'version', 'changelog', 'tag', 'i18n', 'i18n-merge', 'i18n-normalize', 'help')][string]$Target = 'check',
 	[string]$From
 )
 
@@ -56,7 +60,9 @@ switch ($Target) {
 		if (Test-Path -LiteralPath $buildDir) { Remove-Item -LiteralPath $buildDir -Recurse -Force }
 		Write-Host ("cleaned  {0}" -f $buildDir)
 	}
+	'version' { Invoke-Step 'tools\version.ps1' }
 	'changelog' { Invoke-Step 'tools\changelog.ps1' }
+	'tag' { Invoke-Step 'tools\tag.ps1' }
 	'i18n' { Invoke-Step 'tools\i18n.ps1' @('-Action', 'todo') }
 	'i18n-merge' {
 		if (-not $From) { throw 'i18n-merge needs -From <directory> holding the translated files' }

@@ -97,4 +97,18 @@ $out = ($merged -join $eol)
 [System.IO.File]::WriteAllBytes($ChangelogPath, [System.Text.UTF8Encoding]::new($false).GetBytes($out))
 
 Write-Host ("==> Inserted the [{0}] section into CHANGELOG.md." -f $Version)
-Write-Host '==> Read it through and rewrite what reads like a commit subject, then commit it.'
+Write-Host '==> Read it through and rewrite what reads like a commit subject, then commit it:'
+
+# While the bump commit tools\version.ps1 wrote is still unpushed, the changelog
+# belongs in it -- one commit per release, and one place to review it.
+$lastSubject = & git -C $RepoRoot log -1 --pretty=%s
+& git -C $RepoRoot rev-parse -q --verify '@{u}' > $null
+$pushed = ($LASTEXITCODE -eq 0) -and ((& git -C $RepoRoot rev-parse HEAD) -eq (& git -C $RepoRoot rev-parse '@{u}'))
+Write-Host '      git add CHANGELOG.md'
+if (-not $pushed -and $lastSubject -eq ("build(release): bump version to {0}" -f $Version)) {
+	Write-Host '      git commit --amend --no-edit'
+	Write-Host ("      git push -u origin {0}" -f (& git -C $RepoRoot rev-parse --abbrev-ref HEAD))
+	Write-Host '    which keeps the release at one commit. Then open a pull request and merge it.'
+} else {
+	Write-Host ("      git commit -s -m ""build(release): update changelog for {0}""" -f $Version)
+}
