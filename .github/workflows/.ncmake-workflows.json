@@ -4,6 +4,11 @@
     "sha": "4972f8bb33dbeef4ff141444c50ad49adf6cb93d",
     "source": "nextcloud"
   },
+  "branch-cleanup.yml": {
+    "hash": "621cfd0244b8b94188ec6c525093eff06b11475d5e866ead7ee11b02b589591a",
+    "sha": "0a5957bffde5b7b2e4d33f6dae5f75c982ee93e6",
+    "source": "ncmake"
+  },
   "workflow-updater.yml": {
     "hash": "814e72f4b396311bef70f1a8c576cbab21b3da3a8be445c9a60785d4e32eca1b",
     "sha": "ee4b34f40f35dc808ff03ad661d6165a8826e2b9",
