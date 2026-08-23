@@ -271,6 +271,7 @@ $script:I18N_Embedded_En = @'
 #__inc:modules/Unlock-PortableSecretStore.ps1__
 #__inc:modules/Get-PortableSecretPayload.ps1__
 #__inc:modules/Get-AccountsRegPath.ps1__
+#__inc:modules/Split-ServerString.ps1__
 #__inc:modules/Get-AccountKey.ps1__
 #__inc:modules/Get-AccountSecret.ps1__
 #__inc:modules/Set-AccountSecret.ps1__
