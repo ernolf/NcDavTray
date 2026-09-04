@@ -22,6 +22,26 @@ $RegAccounts  = Join-Path $RegBase 'Accounts'
 $RegMounts    = Join-Path $RegBase 'Mounts'
 $RegMP2       = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2'
 $RegWebClient = 'HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters'
+# Icon overlay handlers. Windows loads the first entries of that key in sort order
+# and ignores the rest, which is why installers pad their key names with leading
+# spaces to claim a slot.
+$RegOverlays  = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers'
+$OverlayLimit = 15
+# Context menu handlers, per class the shell asks about a folder or a drive. HKCR
+# is not a drive in PowerShell, so these are provider paths.
+$RegShellEx   = @(
+	'Registry::HKEY_CLASSES_ROOT\Directory\shellex\ContextMenuHandlers',
+	'Registry::HKEY_CLASSES_ROOT\Directory\Background\shellex\ContextMenuHandlers',
+	'Registry::HKEY_CLASSES_ROOT\Drive\shellex\ContextMenuHandlers',
+	'Registry::HKEY_CLASSES_ROOT\Folder\shellex\ContextMenuHandlers',
+	'Registry::HKEY_CLASSES_ROOT\*\shellex\ContextMenuHandlers'
+)
+# The two whose overlay scanner walks folders on its own instead of only answering
+# about the one on screen, and therefore the two that can flood a mapped drive.
+$RegTortoise  = @(
+	'HKCU:\Software\TortoiseGit',
+	'HKCU:\Software\TortoiseSVN'
+)
 # Shared state, keyed on the application name and therefore in the same place as
 # an installed copy: a portable copy keeps it here too, because processes and
 # their PIDs live per user session, not per folder.
@@ -858,6 +878,118 @@ try {
 } catch {
 	Add-Line $sb "Failed to query Win32_LogicalDisk for network drives."
 }
+
+# ---------- Shell extensions ----------
+# Explorer loads these into itself and runs them on whatever folder is open. On a
+# mapped drive every question such a handler asks about a folder can become a
+# request to the server, so one that is allowed onto the drive costs more than the
+# browsing it decorates. This is the section that explains a slow drive when
+# nothing about the connection is wrong.
+Add-Section $sb 'Shell extensions'
+
+# A handler key holds a CLSID, and the CLSID points at the module implementing it.
+# That module path is what actually names the program behind an entry.
+function Get-ShellExModule {
+	param([string]$keyPath)
+
+	try {
+		$clsid = (Get-ItemProperty -LiteralPath $keyPath -ErrorAction Stop).'(default)'
+	} catch {
+		return ''
+	}
+	if (-not $clsid) { return '' }
+
+	$server = ("Registry::HKEY_CLASSES_ROOT\CLSID\{0}\InprocServer32" -f $clsid)
+	try {
+		$module = (Get-ItemProperty -LiteralPath $server -ErrorAction Stop).'(default)'
+	} catch {
+		return $clsid
+	}
+	if ($module) { return $module }
+	return $clsid
+}
+
+try {
+	$overlays = @(Get-ChildItem -LiteralPath $RegOverlays -ErrorAction Stop | ForEach-Object { $_.PSChildName })
+	# Ordinal, because that is the order the leading spaces are meant for: a
+	# culture-aware sort weighs them differently.
+	[Array]::Sort($overlays, [System.StringComparer]::Ordinal)
+
+	Add-Line $sb ("Icon overlay handlers in {0}" -f $RegOverlays)
+	Add-Line $sb ("Registered: {0}. Windows loads the first {1} in sort order and ignores the rest." -f $overlays.Count, $OverlayLimit)
+
+	$i = 0
+	foreach ($name in $overlays) {
+		$i++
+		if ($i -eq ($OverlayLimit + 1)) {
+			Add-Line $sb "  ----- not loaded below this line -----"
+		}
+		$module = Get-ShellExModule ("{0}\{1}" -f $RegOverlays, $name)
+		Add-Line $sb ("  {0,2}. {1,-34} {2}" -f $i, $name, $module)
+	}
+} catch {
+	Add-Line $sb ("Failed to read registry path: {0}" -f $RegOverlays)
+}
+
+Add-Line $sb ''
+Add-Line $sb 'Context menu handlers'
+
+foreach ($root in $RegShellEx) {
+	$label = $root.Replace('Registry::HKEY_CLASSES_ROOT', 'HKCR')
+	try {
+		$handlers = @(Get-ChildItem -LiteralPath $root -ErrorAction Stop | ForEach-Object { $_.PSChildName })
+	} catch {
+		Add-Line $sb ("  {0}: not present or unreadable" -f $label)
+		continue
+	}
+	if ($handlers.Count -eq 0) {
+		Add-Line $sb ("  {0}: none" -f $label)
+	} else {
+		Add-Line $sb ("  {0}: {1}" -f $label, ($handlers -join ', '))
+	}
+}
+
+Add-Line $sb ''
+Add-Line $sb 'Overlay scanners that walk folders on their own'
+
+foreach ($root in $RegTortoise) {
+	if (-not (Test-Path -LiteralPath $root)) {
+		Add-Line $sb ("  {0}: not installed" -f $root)
+		continue
+	}
+	try {
+		$props = Get-ItemProperty -LiteralPath $root -ErrorAction Stop
+	} catch {
+		Add-Line $sb ("  {0}: unreadable" -f $root)
+		continue
+	}
+
+	Add-Line $sb ("  {0}" -f $root)
+	# Only the values that decide where the scanner and the context menu are
+	# allowed. A name missing from this list is missing from the registry, which
+	# means it is at its default - and a default is not the same as off.
+	$wanted = @($props.PSObject.Properties | Where-Object {
+		$_.Name -like 'Overlay*' -or $_.Name -like 'DriveMask*' -or
+		$_.Name -eq 'ShowExcludedAsNormal' -or $_.Name -eq 'NoContextPaths' -or
+		$_.Name -eq 'CurrentVersion'
+	})
+	if ($wanted.Count -eq 0) {
+		Add-Line $sb "    no overlay or context menu values set; all at their defaults"
+	} else {
+		foreach ($p in ($wanted | Sort-Object Name)) {
+			# A path list is a multi-line string; keep it on one line here. The
+			# dialog writes a trailing newline even for an empty list, hence the
+			# trim before the separator goes in.
+			$value = ("{0}" -f $p.Value).Replace("`r", '').Trim().Replace("`n", ' | ')
+			if (-not $value) { $value = '<empty>' }
+			Add-Line $sb ("    {0} = {1}" -f $p.Name, $value)
+		}
+	}
+}
+
+Add-Line $sb ''
+Add-Line $sb 'A handler asks its questions on every folder it is allowed to touch, and on a mapped drive'
+Add-Line $sb "that is traffic. See the wiki page 'Tortoise icon overlays' for what to restrict and how."
 
 # ---------- NcDavTray mapping / branding checks ----------
 Add-Section $sb 'NcDavTray mapping / branding checks'
