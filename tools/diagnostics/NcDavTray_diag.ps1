@@ -1,4 +1,4 @@
-# NcDavTray - WebDAV / WebClient diagnostics
+﻿# NcDavTray - WebDAV / WebClient diagnostics
 # Read-only: collects environment info to debug "mapping failed" issues.
 # No password and no share token ever reaches the report; host and user names do
 # unless the anonymized profile is chosen at the prompt.
@@ -42,6 +42,11 @@ $RegTortoise  = @(
 	'HKCU:\Software\TortoiseGit',
 	'HKCU:\Software\TortoiseSVN'
 )
+# Explorer's own settings, per user. FolderContentsInfoTip is the one that costs a
+# mapped drive: with it on, resting the pointer on a folder makes the shell add up
+# the size by listing everything underneath it, down to the last leaf.
+$RegExplorer     = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+$ExplorerDefault = 'FolderContentsInfoTip'
 # Shared state, keyed on the application name and therefore in the same place as
 # an installed copy: a portable copy keeps it here too, because processes and
 # their PIDs live per user session, not per folder.
@@ -987,9 +992,49 @@ foreach ($root in $RegTortoise) {
 	}
 }
 
-Add-Line $sb ''
-Add-Line $sb 'A handler asks its questions on every folder it is allowed to touch, and on a mapped drive'
-Add-Line $sb "that is traffic. See the wiki page 'Tortoise icon overlays' for what to restrict and how."
+# ---------- Explorer settings ----------
+Add-Section $sb 'Explorer settings'
+
+Write-Host ""
+Write-Host "Optional: all values under Explorer\Advanced, not only the one that costs a mapped drive." -ForegroundColor Yellow
+$doExplorerAll = Read-Host "Show all Explorer settings? [y/N]"
+
+Add-Line $sb ("  {0}" -f $RegExplorer)
+
+try {
+	$props = Get-ItemProperty -LiteralPath $RegExplorer -ErrorAction Stop
+} catch {
+	$props = $null
+	Add-Line $sb '    unreadable'
+}
+
+if ($props) {
+	$names = @($ExplorerDefault)
+	if ($doExplorerAll -match '^[Yy]') {
+		$names = @($props.PSObject.Properties |
+		           Where-Object { $_.Name -notlike 'PS*' } |
+		           ForEach-Object { $_.Name })
+		# Ordinal, so the order does not move with the display language.
+		[Array]::Sort($names, [System.StringComparer]::Ordinal)
+	}
+
+	foreach ($name in $names) {
+		$prop = $props.PSObject.Properties[$name]
+		if (-not $prop) {
+			# Missing from the registry is not the same as off: the shell uses
+			# its own default until the value has been written once.
+			Add-Line $sb ("    {0} = <not set>" -f $name)
+			continue
+		}
+		$value = $prop.Value
+		if ($value -is [byte[]]) {
+			$value = (($value | ForEach-Object { $_.ToString('x2') }) -join ' ')
+		} elseif ($value -is [string[]]) {
+			$value = ($value -join ' | ')
+		}
+		Add-Line $sb ("    {0} = {1}" -f $name, $value)
+	}
+}
 
 # ---------- NcDavTray mapping / branding checks ----------
 Add-Section $sb 'NcDavTray mapping / branding checks'
