@@ -4,14 +4,14 @@
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 version: 2
 updates:
-  # The actions of the repository's own workflows (ncmake-workflows/). With a
+  # The actions of the repository's own workflows (.ncmake/workflows/). With a
   # directory other than "/", Dependabot reads only the YAML files of that
   # directory, so it never opens .github/workflows: those workflows are managed
   # by ncmake, and a change by Dependabot would make ncmake flag them as locally
   # modified. The templates arrive through the workflow updater, the own
   # workflows through make workflows-update.
   - package-ecosystem: github-actions
-    directory: "/ncmake-workflows"
+    directory: "/.ncmake/workflows"
     schedule:
       interval: weekly
     commit-message:
