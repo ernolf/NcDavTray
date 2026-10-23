@@ -9,6 +9,21 @@
     "sha": "0a5957bffde5b7b2e4d33f6dae5f75c982ee93e6",
     "source": "ncmake"
   },
+  "ncdavtray-checks.yml": {
+    "hash": "b4a34ffe2fff331b4cf09437cab800ff20a8fa2608f6b0f9ba6b930e29b6d756",
+    "sha": "451ac783a9ed7c5a8874f278434cf2e8335b382a",
+    "source": "local"
+  },
+  "ncdavtray-release.yml": {
+    "hash": "26275da6924ce274901b4309d769ffe226e205bc1d8527ee2fa7c0b7b50681d5",
+    "sha": "415a04ceca1adb40a2f90d2d061792a45cd665ce",
+    "source": "local"
+  },
+  "reuse.yml": {
+    "hash": "7507fa539b8cdec70a5de786fbac4e38f1e53f9df404dbfc75bb2fe7950bc010",
+    "sha": "67fdafc440e24937ece9f2f16d7f2c2df2c7efa5",
+    "source": "nextcloud"
+  },
   "workflow-updater.yml": {
     "hash": "814e72f4b396311bef70f1a8c576cbab21b3da3a8be445c9a60785d4e32eca1b",
     "sha": "ee4b34f40f35dc808ff03ad661d6165a8826e2b9",

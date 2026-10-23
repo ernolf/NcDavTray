@@ -8,14 +8,6 @@ on:
   pull_request:
 
 jobs:
-  reuse:
-    name: REUSE compliance
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: reuse lint
-        run: docker run --rm --volume "${{ github.workspace }}:/data" fsfe/reuse lint
-
   build:
     name: Build and static checks
     runs-on: windows-latest

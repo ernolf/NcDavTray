@@ -1,0 +1,4 @@
+{
+    "name": "NcDavTray release",
+    "description": "Rebuild a published release from its tag, verify the tag against meta/Version.ps1 and attach the release archive"
+}
