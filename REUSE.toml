@@ -41,7 +41,7 @@ SPDX-License-Identifier = "GPL-3.0-or-later"
 # here.
 
 [[annotations]]
-path = "ncmake-workflows/*.properties.json"
+path = ".ncmake/workflows/*.properties.json"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
 SPDX-License-Identifier = "GPL-3.0-or-later"
