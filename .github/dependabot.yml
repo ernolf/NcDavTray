@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # The actions of the repository's own workflows (ncmake-workflows/). With a
+  # directory other than "/", Dependabot reads only the YAML files of that
+  # directory, so it never opens .github/workflows: those workflows are managed
+  # by ncmake, and a change by Dependabot would make ncmake flag them as locally
+  # modified. The templates arrive through the workflow updater, the own
+  # workflows through make workflows-update.
+  - package-ecosystem: github-actions
+    directory: "/ncmake-workflows"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      actions:
+        patterns:
+          - "*"

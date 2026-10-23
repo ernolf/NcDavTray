@@ -1,0 +1,4 @@
+{
+    "name": "NcDavTray checks",
+    "description": "Build NcDavTray and run its static checks, and build the release archive, on every push and pull request"
+}

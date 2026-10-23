@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: Build and static checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The same target a contributor runs at home: assemble build\NcDavTray,
+      # then parse the result for syntax, unresolved commands, variables that
+      # are never assigned and i18n keys without a translation.
+      - name: make check
+        shell: cmd
+        run: make.cmd check
+
+  dist:
+    name: Release archive builds
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Not to publish anything, only to be sure the archive can be produced --
+      # a release must not be the first time this target is exercised.
+      - name: make dist
+        shell: cmd
+        run: make.cmd dist
+      - name: Name the artifact after the product
+        shell: pwsh
+        run: |
+          . .\meta\AppName.ps1
+          "artifact=$AppName" >> $env:GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.artifact }}
+          path: build/*.zip

@@ -37,11 +37,20 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
+# JSON has no comment syntax, so the sidecar of each own workflow is covered
+# here.
+
+[[annotations]]
+path = "ncmake-workflows/*.properties.json"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
 # Repository metadata: comment syntax exists in most of these, but a header would
 # be the larger part of the file.
 
 [[annotations]]
-path = [".editorconfig", ".gitattributes", ".gitignore", ".github/FUNDING.yml", "LICENSE", "REUSE.toml"]
+path = [".editorconfig", ".gitattributes", ".gitignore", "LICENSE", "REUSE.toml"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2025 - 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>"
 SPDX-License-Identifier = "GPL-3.0-or-later"
