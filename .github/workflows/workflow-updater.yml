@@ -100,6 +100,7 @@ jobs:
           persist-credentials: false
 
       - name: Refresh managed workflows from upstream
+        id: refresh
         env:
           # 'make dev-init' lists the ncmake modules through the GitHub API, and
           # an anonymous call gets 60 requests per hour counted per source IP --
@@ -109,6 +110,11 @@ jobs:
         run: |
           make dev-init
           make workflows-update
+          # LICENSES/ holds the texts make workflows-update adds for a license an
+          # updated workflow names. create-pull-request stages add-paths with one
+          # git add, which stages nothing when a path does not exist, so
+          # LICENSES/ is named only where it does.
+          echo "paths=.github/workflows/$(test ! -d LICENSES || echo ,LICENSES/)" >> "$GITHUB_OUTPUT"
 
       - name: Open pull request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
@@ -118,15 +124,16 @@ jobs:
           signoff: true
           branch: ncmake/ci/workflow-update
           delete-branch: true
-          add-paths: .github/workflows/
+          add-paths: ${{ steps.refresh.outputs.paths }}
           title: 'ci: update managed CI workflows from upstream'
           commit-message: 'ci: update managed CI workflows from upstream'
           body: |
             Automated by the ncmake workflow updater.
 
             `make workflows-update` refreshed the ncmake-managed workflows from
-            their upstream templates (nextcloud/.github + ncmake). Locally
-            modified workflows are left untouched. Review the diff and merge.
+            their sources (the app's .ncmake/workflows/, ernolf/ncmake-workflows,
+            nextcloud/.github). Locally modified workflows are left untouched.
+            Review the diff and merge.
 
             ---
 
