@@ -10,13 +10,13 @@
     "source": "ncmake"
   },
   "ncdavtray-checks.yml": {
-    "hash": "b4a34ffe2fff331b4cf09437cab800ff20a8fa2608f6b0f9ba6b930e29b6d756",
-    "sha": "451ac783a9ed7c5a8874f278434cf2e8335b382a",
+    "hash": "05f19c4fee621a832987609b8cab8ab10ee64a48c10fd027b1af51d29bd10aac",
+    "sha": "3999693ab2af88f5aacc91aa1edf6e0f01402f67",
     "source": "local"
   },
   "ncdavtray-release.yml": {
-    "hash": "26275da6924ce274901b4309d769ffe226e205bc1d8527ee2fa7c0b7b50681d5",
-    "sha": "415a04ceca1adb40a2f90d2d061792a45cd665ce",
+    "hash": "5567228bdad180f1b9d6e2b96c4fe4fc9bbe88883cad67bf0170a9a2e61586fc",
+    "sha": "4087915340cca18a6a4aaec91b8e4c898dd509e5",
     "source": "local"
   },
   "reuse.yml": {

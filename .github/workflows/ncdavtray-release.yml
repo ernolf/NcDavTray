@@ -11,15 +11,18 @@ on:
     types: [published]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   archive:
     name: Attach the release archive
     runs-on: windows-latest
+    permissions:
+      contents: write # gh release upload
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           # What the release points at, not the default branch: a release is cut
           # from a tag and that tag is what has to be built.
           ref: ${{ github.event.release.tag_name }}
@@ -30,11 +33,12 @@ jobs:
       # would ever hear of one. So it is settled here, before anything is built.
       - name: Tag and meta/Version.ps1 agree
         shell: pwsh
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           . .\meta\AppName.ps1
           . .\meta\Version.ps1
-          $tag = '${{ github.event.release.tag_name }}'
-          if ($tag -ne "v$Version") { throw "release $tag was cut from a tree that says $Version -- see meta/Version.ps1" }
+          if ($env:TAG -ne "v$Version") { throw "release $env:TAG was cut from a tree that says $Version -- see meta/Version.ps1" }
           "archive=${AppName}_v$Version.zip" >> $env:GITHUB_ENV
 
       # The same targets a contributor runs at home, in the same order.
@@ -50,4 +54,5 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload ${{ github.event.release.tag_name }} "build\$($env:archive)" --clobber
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload $env:TAG "build\$($env:archive)" --clobber
