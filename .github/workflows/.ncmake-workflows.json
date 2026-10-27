@@ -9,6 +9,11 @@
     "sha": "0a5957bffde5b7b2e4d33f6dae5f75c982ee93e6",
     "source": "ncmake"
   },
+  "lint-actions-security.yml": {
+    "hash": "946a1c4508050dcdcafce853b06352d3b3849860bb1970f9c192305c8046daf1",
+    "sha": "68d667016bbca1a53754fc86c678156f373519e4",
+    "source": "ncmake"
+  },
   "ncdavtray-checks.yml": {
     "hash": "05f19c4fee621a832987609b8cab8ab10ee64a48c10fd027b1af51d29bd10aac",
     "sha": "3999693ab2af88f5aacc91aa1edf6e0f01402f67",
