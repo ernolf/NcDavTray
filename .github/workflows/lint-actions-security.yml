@@ -1,0 +1,119 @@
+# SPDX-FileCopyrightText: 2026 [ernolf] Raphael Gradenwitz <raphael.gradenwitz@googlemail.com>
+# SPDX-License-Identifier: MIT
+#
+# Workflow security linter: zizmor over every tracked GitHub Actions workflow
+# and action definition.
+# https://github.com/ernolf/ncmake
+#
+# lint-actions checks that a workflow is valid, this one that it is safe:
+# pull_request_target or workflow_run running the code of a pull request,
+# ${{ github.event.* }} expanded into run:, actions not pinned to a commit,
+# permissions broader than the job needs, credentials persisted by
+# actions/checkout, cache poisoning in release workflows.
+#
+# The job runs make lint-actions-security of the ncmake lint module, the same
+# target a maintainer runs locally, so both give the same result: the files it
+# collects, the zizmor version and the rule that fails live in that module only.
+# It collects the workflows as lint-actions collects them, together with every
+# tracked action.yml, runs zizmor offline and reads .github/zizmor.yml or
+# zizmor.yml from the repository root when there is one. The ncmake bootstrap is
+# fetched into the runner's temp directory, so the repository needs none of its
+# own. Only the step that fetches the ncmake modules sees a token.
+#
+# Findings of medium severity and above fail the job, low and informational
+# ones are shown and pass. The report goes to the job summary.
+#
+# The upload to code scanning is off by default, so no job holds
+# security-events: write. The repository variable ZIZMOR_CODE_SCANNING set to
+# true adds a job that uploads the findings as SARIF:
+#   gh variable set ZIZMOR_CODE_SCANNING -b true
+
+name: Lint actions security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-actions-security-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  NCMAKE_BOOTSTRAP: https://raw.githubusercontent.com/ernolf/ncmake/main/bootstrap/GNUmakefile
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch ncmake
+        env:
+          # make dev-init lists the ncmake modules through the GitHub API, which
+          # answers an anonymous call from a shared hosted runner with 403 every
+          # so often.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ncmake-bootstrap.mk" "$NCMAKE_BOOTSTRAP"
+          make -f "$RUNNER_TEMP/ncmake-bootstrap.mk" --no-print-directory dev-init
+
+      - name: Run make lint-actions-security
+        run: |
+          out="$RUNNER_TEMP/lint-actions-security.txt"
+          rc=0
+          make -f "$RUNNER_TEMP/ncmake-bootstrap.mk" --no-print-directory lint-actions-security > "$out" || rc=$?
+          cat "$out"
+          {
+            echo '## lint-actions-security'
+            echo
+            echo '```text'
+            cat "$out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if test "$rc" != 0; then
+            echo "::error::make lint-actions-security failed: findings of medium severity or above, or a run that could not be carried out."
+            exit 1
+          fi
+
+  code-scanning:
+    name: zizmor code scanning
+    if: vars.ZIZMOR_CODE_SCANNING == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout
+      security-events: write # upload-sarif sends the findings to code scanning
+      actions: read # upload-sarif reads the workflow run in a private repository
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch ncmake
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ncmake-bootstrap.mk" "$NCMAKE_BOOTSTRAP"
+          make -f "$RUNNER_TEMP/ncmake-bootstrap.mk" --no-print-directory dev-init
+
+      - name: Run make lint-actions-security SARIF=
+        run: |
+          # The zizmor job fails on the findings; here only a SARIF file that was
+          # not written stops the step. The workflow itself is tracked, so a run
+          # that was carried out always writes one.
+          make -f "$RUNNER_TEMP/ncmake-bootstrap.mk" --no-print-directory lint-actions-security SARIF="$RUNNER_TEMP/zizmor.sarif" || :
+          test -s "$RUNNER_TEMP/zizmor.sarif"
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: ${{ runner.temp }}/zizmor.sarif
+          category: zizmor
