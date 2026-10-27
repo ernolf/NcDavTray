@@ -7,12 +7,17 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build and static checks
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The same target a contributor runs at home: assemble build\NcDavTray,
       # then parse the result for syntax, unresolved commands, variables that
       # are never assigned and i18n keys without a translation.
@@ -24,7 +29,9 @@ jobs:
     name: Release archive builds
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Not to publish anything, only to be sure the archive can be produced --
       # a release must not be the first time this target is exercised.
       - name: make dist
@@ -35,7 +42,7 @@ jobs:
         run: |
           . .\meta\AppName.ps1
           "artifact=$AppName" >> $env:GITHUB_ENV
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ env.artifact }}
           path: build/*.zip
