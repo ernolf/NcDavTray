@@ -41,7 +41,7 @@ on:
   # "@ncmake-updater rebase" in a pull request comment. issue_comment fires for
   # every comment in the repository, plain issues included; the update job
   # filters down to pull request comments that carry the command.
-  issue_comment:
+  issue_comment: # zizmor: ignore[dangerous-triggers] commands only from OWNER/MEMBER/COLLABORATOR, no comment text in run:, default branch checked out
     types: [created]
 
 permissions:
@@ -84,6 +84,11 @@ jobs:
         with:
           client-id: ${{ secrets.NCMAKE_UPDATER_CLIENT_ID }}
           private-key: ${{ secrets.NCMAKE_UPDATER_PRIVATE_KEY }}
+          # Without these the token carries every permission of the app.
+          permission-contents: write # push the update branch
+          permission-pull-requests: write # open the pull request
+          permission-workflows: write # the branch changes .github/workflows/
+          permission-metadata: read
 
       - name: Acknowledge the command
         if: github.event_name == 'issue_comment'
@@ -172,6 +177,8 @@ jobs:
         with:
           client-id: ${{ secrets.NCMAKE_UPDATER_CLIENT_ID }}
           private-key: ${{ secrets.NCMAKE_UPDATER_PRIVATE_KEY }}
+          permission-contents: write # delete the branch
+          permission-metadata: read
 
       - name: Delete the merged updater branch if it is still there
         env:
