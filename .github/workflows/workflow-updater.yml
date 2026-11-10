@@ -14,11 +14,13 @@
 # only those are refreshed, and a workflow the default branch gained later comes
 # over with make workflows-install.
 #
-# A comment of "@ncmake-updater rebase" on a pull request re-runs the update
-# job, which is all a rebase needs here: the job checks out the base branch,
-# regenerates the workflows and lets create-pull-request rebuild the branch from
-# that base. Going through the API is what keeps the commit verified -- a git
-# rebase in the runner would push unsigned commits, because no key lives there.
+# A comment of "@ncmake-updater rebase" on a pull request of the updater re-runs
+# the update job, which is all a rebase needs here: the job checks out the base
+# branch, regenerates the workflows and lets create-pull-request rebuild the
+# branch from that base. Going through the API is what keeps the commit verified
+# -- a git rebase in the runner would push unsigned commits, because no key
+# lives there. On any other pull request the comment is left alone, so another
+# workflow that opens pull requests through the same app can answer it there.
 #
 # Authentication is a GitHub App (Contents, Pull requests and Workflows: write),
 # minted per run as a short-lived token. The app is required because the default
@@ -47,7 +49,8 @@ on:
     types: [closed]
   # "@ncmake-updater rebase" in a pull request comment. issue_comment fires for
   # every comment in the repository, plain issues included; the branches job
-  # filters down to pull request comments that carry the command.
+  # filters down to comments on a pull request of the updater that carry the
+  # command.
   issue_comment: # zizmor: ignore[dangerous-triggers] commands only from OWNER/MEMBER/COLLABORATOR, no comment text in run:, a branch of this repository checked out, never the pull request head
     types: [created]
 
@@ -77,23 +80,16 @@ jobs:
       )
     runs-on: ubuntu-latest
     # Reacting to the comment and reading the branches and the pull request are
-    # all the default token is used for here.
+    # all the default token is used for here. A reaction on a comment of a pull
+    # request needs Pull requests: write; Issues: write alone is answered with
+    # 403.
     permissions:
       contents: read
       issues: write
-      pull-requests: read
+      pull-requests: write
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
     steps:
-      - name: Acknowledge the command
-        if: github.event_name == 'issue_comment'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --method POST \
-            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
-            -f content=eyes
-
       - name: Pick the branches
         id: pick
         env:
@@ -105,14 +101,18 @@ jobs:
           default=$(gh api "repos/$REPO" --jq .default_branch)
           bases=$default
           if [ "$EVENT" = issue_comment ]; then
-            # The command rebuilds the pull request it is written on when that
-            # is the one of a line; on any other pull request it means the one
-            # of the default branch, as before the lines were covered.
-            head=$(gh api "repos/$REPO/pulls/$PR" --jq .head.ref)
-            base=$(gh api "repos/$REPO/pulls/$PR" --jq .base.ref)
-            case $base in
-              stable*) [ "$head" != "ncmake/ci/workflow-update-$base" ] || bases=$base ;;
-            esac
+            # The command rebuilds the pull request it is written on, and only
+            # one of the updater, pushed to this repository: on any other one
+            # nothing is picked and the comment stays unanswered here.
+            read -r head base head_repo < <(gh api "repos/$REPO/pulls/$PR" \
+              --jq '"\(.head.ref) \(.base.ref) \(.head.repo.full_name)"')
+            bases=
+            if [ "$head_repo" = "$REPO" ]; then
+              case $head in
+                ncmake/ci/workflow-update) [ "$base" != "$default" ] || bases=$base ;;
+                ncmake/ci/workflow-update-stable*) [ "$head" != "ncmake/ci/workflow-update-$base" ] || bases=$base ;;
+              esac
+            fi
           else
             # Only the lines ncmake manages workflows on: a branch without the
             # lock file has no managed workflow to refresh, and a retired line
@@ -128,9 +128,20 @@ jobs:
           printf 'Branches to refresh:\n%s\n' "$bases"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
+      - name: Acknowledge the command
+        if: github.event_name == 'issue_comment' && steps.pick.outputs.matrix != '[]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes
+
   update:
     # Refresh the workflows of one branch and open the pull request against it.
     needs: branches
+    # A command on a pull request that is not the updater's picks no branch.
+    if: needs.branches.outputs.matrix != '[]'
     runs-on: ubuntu-latest
     strategy:
       # A line that fails, for example one whose checkout predates ncmake, must
@@ -143,6 +154,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      pull-requests: write
     steps:
       - name: Create app token
         id: app-token
