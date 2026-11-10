@@ -30,8 +30,8 @@
     "source": "nextcloud"
   },
   "workflow-updater.yml": {
-    "hash": "8e7c059695dac9e804c58392566f2078749055f11c5d7eb740532691701febaa",
-    "sha": "f8195a3ea54c3e967c18a903da86931734f99451",
+    "hash": "c13c18d97c6ed8414b23bdd3d3f18b1f22f2b3811ecddf971b4597a9512abcc7",
+    "sha": "bb3ae8b72d9e44b190683b26b9d4e03b8783bd15",
     "source": "ncmake"
   }
 }
